@@ -25,21 +25,67 @@ function setStatus(text, type) {
   const light = document.getElementById("statusLight");
   if (light && type) light.className = "status-light status-" + type;
 }
-function log(msg) {
+function log(msg, type) {
   const box = document.getElementById("logBox");
   if (!box) return;
   const line = document.createElement("div");
-  line.textContent = new Date().toLocaleTimeString() + "  " + msg;
+  line.className = "log-line log-" + (type || "info");
+  const ts = new Date().toLocaleTimeString("en-US", { hour12: false });
+  line.textContent = "[" + ts + "] " + msg;
   box.appendChild(line);
   box.scrollTop = box.scrollHeight;
 }
+
+// ─── ICE Server config ────────────────────────────────────
+// STUN alone fails on org networks with symmetric NAT or strict UDP firewalls.
+// TURN relays traffic through a server — works even behind corporate firewalls
+// because it can use TCP port 443 (looks like HTTPS to the firewall).
+//
+// These are FREE public TURN servers from Metered.ca — fine for personal use.
+// For production / heavy use, host your own: https://github.com/coturn/coturn
+//
+// ⚠ If your org blocks ALL external traffic you need a TURN server
+//   running INSIDE your org network, or on a VPS your org allows.
+const ICE_SERVERS = [
+  // STUN — fast, free, no relay (works on open networks)
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+
+  // TURN over UDP 3478 — first fallback for symmetric NAT
+  {
+    urls:       "turn:openrelay.metered.ca:80",
+    username:   "openrelayproject",
+    credential: "openrelayproject"
+  },
+  // TURN over TCP 80 — works when UDP is blocked
+  {
+    urls:       "turn:openrelay.metered.ca:80?transport=tcp",
+    username:   "openrelayproject",
+    credential: "openrelayproject"
+  },
+  // TURN over TCP 443 — looks like HTTPS, bypasses most firewalls
+  {
+    urls:       "turn:openrelay.metered.ca:443",
+    username:   "openrelayproject",
+    credential: "openrelayproject"
+  },
+  // TURNS (TLS) 443 — encrypted relay, gets through the strictest firewalls
+  {
+    urls:       "turns:openrelay.metered.ca:443?transport=tcp",
+    username:   "openrelayproject",
+    credential: "openrelayproject"
+  }
+];
 
 // ─── Peer ─────────────────────────────────────────────────
 function createPeer() {
   if (pc) { pc.close(); pc = null; }
   pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }]
+    iceServers: ICE_SERVERS,
+    // Try all candidate types; the browser auto-selects the best working path
+    iceTransportPolicy: "all"
   });
+
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
     log("Connection: " + s);
@@ -51,6 +97,22 @@ function createPeer() {
       const el = document.getElementById(id); if (el) el.disabled = !ok;
     });
   };
+
+  // Log ICE candidates so you can diagnose connection type (host/srflx/relay)
+  pc.onicecandidate = (e) => {
+    if (e.candidate) {
+      const t = e.candidate.type || "?";
+      // "relay" = TURN is being used, "srflx" = STUN, "host" = direct
+      log("ICE candidate: " + t + " (" + (e.candidate.protocol || "?") + ")");
+    }
+  };
+
+  pc.onicecandidateerror = (e) => {
+    // 701 = TURN auth failed, 600 = unreachable — log but don't panic,
+    // the browser tries all servers automatically
+    if (e.errorCode !== 701) log("ICE error " + e.errorCode + ": " + e.errorText, "warn");
+  };
+
   // ondatachannel fires on the answerer side
   pc.ondatachannel = (event) => { channel = event.channel; setupChannel(); };
 }
