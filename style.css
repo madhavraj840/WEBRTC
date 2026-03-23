@@ -218,6 +218,32 @@ input[type="file"]:disabled {
   font-size: 11px;
 }
 
+.role-pill {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 2px 8px;
+  border-top: 1px solid var(--lt);
+  border-left: 1px solid var(--lt);
+  border-right: 1px solid var(--dkk);
+  border-bottom: 1px solid var(--dkk);
+  font-weight: bold;
+}
+
+.role-none {
+  background: #d4d0c8;
+  color: #333;
+}
+
+.role-a {
+  background: #d8ebff;
+  color: #003a72;
+}
+
+.role-b {
+  background: #fff0cc;
+  color: #6b4700;
+}
+
 .dot {
   width: 10px;
   height: 10px;

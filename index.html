@@ -48,6 +48,7 @@
             <span id="statusDot" class="dot dot-idle"></span>
             <span id="statusText">Not connected</span>
           </div>
+          <div id="roleLock" class="role-pill role-none">Role: Unlocked</div>
 
           <div class="mode-row">
             <label class="mode-label">Share mode:</label>
@@ -60,6 +61,7 @@
             <button id="btnCreateOffer" onclick="createOffer()">Create Offer</button>
             <button id="btnGenAnswer"   onclick="acceptOffer()">Generate Answer</button>
             <button id="btnConnect"     onclick="acceptAnswer()">Connect</button>
+            <button id="btnReset"       onclick="resetSession()">Reset</button>
           </div>
         </fieldset>
 
@@ -73,11 +75,11 @@
             <button id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
           </div>
           <div id="offerQRArea" style="display:none">
-            <p class="hint">Peer B scans this QR — offer loads automatically. Or copy the code below.</p>
+            <p class="hint">Peer B scans this QR. If scanning is unavailable, paste/share the relay ID below.</p>
             <div id="offerQR" class="qr-box"></div>
             <textarea id="offerBoxQR" class="qr-code-text"
               placeholder="QR code text appears here."
-              spellcheck="false" readonly></textarea>
+              spellcheck="false"></textarea>
           </div>
         </fieldset>
 
@@ -91,11 +93,11 @@
             <button id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
           </div>
           <div id="answerQRArea" style="display:none">
-            <p class="hint">Peer A scans this QR — answer loads automatically. Or copy the code below.</p>
+            <p class="hint">Peer A scans this QR. If scanning is unavailable, paste/share the relay ID below.</p>
             <div id="answerQR" class="qr-box"></div>
             <textarea id="answerBoxQR" class="qr-code-text"
               placeholder="QR code text appears here."
-              spellcheck="false" readonly></textarea>
+              spellcheck="false"></textarea>
           </div>
         </fieldset>
 

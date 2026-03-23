@@ -7,8 +7,20 @@ let iceRestarting = false; // prevents multiple simultaneous restart attempts
 let receivedChunks = [];
 let receivedBytes  = 0;
 let incomingFileInfo = null;
+let saveDirectoryHandle = null;
+let incomingWritable = null;
+let localVoiceStream = null;
+let voiceSender = null;
+let remoteVoiceStream = new MediaStream();
+let pttBound = false;
+let makingNegOffer = false;
+let negBusy = false;
+let negQueued = false;
+let peerRole = "none";
 
 const CHUNK_SIZE = 16 * 1024;
+const MAX_BUFFERED_AMOUNT = 1024 * 1024;
+const BUFFERED_LOW_WATERMARK = 256 * 1024;
 
 // ── ICE servers ───────────────────────────────────────────────────────────────
 const ICE_SERVERS = [
@@ -40,8 +52,19 @@ async function uploadToRelay(sdpObject) {
     body: JSON.stringify({ d: compress(sdpObject) })
   });
   if (!res.ok) throw new Error("Relay upload failed: " + res.status);
-  const loc = res.headers.get("Location") || "";
-  const id  = loc.split("/").pop();
+  const loc = res.headers.get("Location") || res.headers.get("location") || "";
+  let id = loc.split("/").pop();
+
+  // Some relays may return the created ID in body rather than Location header.
+  if (!id) {
+    try {
+      const body = await res.clone().json();
+      id = String(body?.id || body?._id || body?.slug || "").trim();
+    } catch (e) {
+      // Ignore parse errors and fail below with a clear message.
+    }
+  }
+
   if (!id) throw new Error("Relay returned no ID");
   return id;
 }
@@ -75,19 +98,15 @@ function getMode() {
 }
 
 function onModeChange() {
-  const relay = getMode() === "relay";
-  document.getElementById("offerTextArea").style.display   = relay ? "none"  : "block";
-  document.getElementById("offerRelayArea").style.display  = relay ? "block" : "none";
-  document.getElementById("answerTextArea").style.display  = relay ? "none"  : "block";
-  document.getElementById("answerRelayArea").style.display = relay ? "block" : "none";
-  document.getElementById("modeHint").textContent = relay
+  const qrMode = getMode() === "qr";
+  document.getElementById("offerTextArea").style.display  = qrMode ? "none"  : "block";
+  document.getElementById("offerQRArea").style.display    = qrMode ? "block" : "none";
+  document.getElementById("answerTextArea").style.display = qrMode ? "none"  : "block";
+  document.getElementById("answerQRArea").style.display   = qrMode ? "block" : "none";
+  document.getElementById("modeHint").textContent = qrMode
     ? "Uses jsonblob.com — gives a short code + QR. Codes expire after ~30 days."
     : "Copy/paste the code — works offline on same network, no relay needed.";
   ["offerQR","answerQR"].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ""; });
-  ["offerShortDisplay","answerShortDisplay"].forEach(id => {
-    const e = document.getElementById(id);
-    if (e) { e.textContent = ""; e.style.display = "none"; }
-  });
 }
 
 // ── Logging / status ──────────────────────────────────────────────────────────
@@ -112,8 +131,25 @@ function setStatus(text, type) {
   });
 }
 
+function setRole(role) {
+  peerRole = role || "none";
+  const el = document.getElementById("roleLock");
+  if (!el) return;
+
+  if (peerRole === "A") {
+    el.textContent = "Role: Peer A (Offerer)";
+    el.className = "role-pill role-a";
+  } else if (peerRole === "B") {
+    el.textContent = "Role: Peer B (Answerer)";
+    el.className = "role-pill role-b";
+  } else {
+    el.textContent = "Role: Unlocked";
+    el.className = "role-pill role-none";
+  }
+}
+
 function setTransferControls(on) {
-  ["chatInput","sendMsgBtn","sendFileBtn","fileInput"].forEach(id => {
+  ["chatInput","sendMsgBtn","sendFileBtn","fileInput","startVoiceBtn"].forEach(id => {
     const el = document.getElementById(id); if (el) el.disabled = !on;
   });
 }
@@ -141,6 +177,219 @@ function formatCode(id) {
   return id.replace(/(\d{4})(?=\d)/g, "$1 ").trim();
 }
 
+function getRelayInputValue(primaryId, fallbackId) {
+  const primary = document.getElementById(primaryId);
+  const fallback = document.getElementById(fallbackId);
+  const value = (primary && primary.value) || (fallback && fallback.value) || "";
+  return value.trim().replace(/\s+/g, "");
+}
+
+function unlockRemoteAudio() {
+  const audio = document.getElementById("remoteAudio");
+  if (!audio) return;
+  audio.muted = false;
+  const p = audio.play();
+  if (p && typeof p.catch === "function") p.catch(() => {});
+}
+
+function getVoiceEl(id) {
+  return document.getElementById(id);
+}
+
+function setVoiceUi(state) {
+  const idle = getVoiceEl("voiceIdle");
+  const active = getVoiceEl("voiceActive");
+  const waiting = getVoiceEl("voiceWaiting");
+  if (idle) idle.style.display = state === "idle" ? "block" : "none";
+  if (active) active.style.display = state === "active" ? "block" : "none";
+  if (waiting) waiting.style.display = state === "waiting" ? "block" : "none";
+}
+
+function setPtt(active) {
+  if (!localVoiceStream) return;
+  const track = localVoiceStream.getAudioTracks()[0];
+  if (track) track.enabled = !!active;
+  const status = getVoiceEl("pttStatus");
+  if (status) status.textContent = active ? "TALKING" : "STANDBY";
+}
+
+function bindPttButton() {
+  if (pttBound) return;
+  const btn = getVoiceEl("pttBtn");
+  if (!btn) return;
+  pttBound = true;
+
+  const start = (e) => {
+    e.preventDefault();
+    setPtt(true);
+  };
+  const stop = (e) => {
+    e.preventDefault();
+    setPtt(false);
+  };
+
+  btn.addEventListener("mousedown", start);
+  btn.addEventListener("mouseup", stop);
+  btn.addEventListener("mouseleave", stop);
+  btn.addEventListener("touchstart", start, { passive: false });
+  btn.addEventListener("touchend", stop, { passive: false });
+  btn.addEventListener("touchcancel", stop, { passive: false });
+}
+
+async function waitForBufferedLow() {
+  if (!channel || channel.readyState !== "open") {
+    throw new Error("Data channel is not open");
+  }
+  if (channel.bufferedAmount <= channel.bufferedAmountLowThreshold) return;
+
+  await new Promise((resolve, reject) => {
+    const onLow = () => cleanup(resolve);
+    const onClose = () => cleanup(() => reject(new Error("Channel closed during send")));
+    const onError = () => cleanup(() => reject(new Error("Channel error during send")));
+
+    function cleanup(next) {
+      channel.removeEventListener("bufferedamountlow", onLow);
+      channel.removeEventListener("close", onClose);
+      channel.removeEventListener("error", onError);
+      next();
+    }
+
+    channel.addEventListener("bufferedamountlow", onLow);
+    channel.addEventListener("close", onClose);
+    channel.addEventListener("error", onError);
+  });
+}
+
+async function sendRenegotiationOffer() {
+  if (!pc || !channel || channel.readyState !== "open") return;
+  if (negBusy) {
+    negQueued = true;
+    return;
+  }
+
+  negBusy = true;
+  try {
+    makingNegOffer = true;
+    await pc.setLocalDescription(await pc.createOffer());
+    await waitIce();
+    channel.send("NEG_OFFER:" + compress(pc.localDescription));
+    log("Sent renegotiation offer.");
+  } catch (err) {
+    log("Renegotiation offer failed: " + err.message, "err");
+  } finally {
+    makingNegOffer = false;
+    negBusy = false;
+    if (negQueued) {
+      negQueued = false;
+      sendRenegotiationOffer();
+    }
+  }
+}
+
+async function authorizeSave() {
+  const status = document.getElementById("authSaveStatus");
+  if (!("showDirectoryPicker" in window)) {
+    if (status) status.textContent = "Streaming save not supported here. Fallback download will be used.";
+    return;
+  }
+
+  try {
+    saveDirectoryHandle = await window.showDirectoryPicker();
+    if (status) status.textContent = "Save folder authorized. Incoming files will stream to disk.";
+    log("Save folder authorized for streamed downloads.", "ok");
+  } catch (err) {
+    if (status) status.textContent = "Save folder not authorized.";
+    log("Pre-auth save canceled.", "warn");
+  }
+}
+
+async function startVoice() {
+  if (!pc || pc.connectionState !== "connected") {
+    log("Connect first before enabling voice.", "warn");
+    return;
+  }
+  if (localVoiceStream) {
+    log("Voice is already enabled.");
+    return;
+  }
+
+  try {
+    unlockRemoteAudio();
+    setVoiceUi("waiting");
+    localVoiceStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
+      video: false
+    });
+
+    const track = localVoiceStream.getAudioTracks()[0];
+    if (!track) throw new Error("No microphone track available");
+    track.enabled = false;
+    voiceSender = pc.addTrack(track, localVoiceStream);
+    bindPttButton();
+    setVoiceUi("active");
+    log("Voice enabled. Hold PTT to talk.", "ok");
+  } catch (err) {
+    setVoiceUi("idle");
+    log("Voice start failed: " + err.message, "err");
+  }
+}
+
+function stopVoice() {
+  try {
+    if (voiceSender && pc) pc.removeTrack(voiceSender);
+    voiceSender = null;
+    if (localVoiceStream) localVoiceStream.getTracks().forEach(t => t.stop());
+    localVoiceStream = null;
+    setVoiceUi("idle");
+    log("Voice disabled.");
+  } catch (err) {
+    log("Voice stop error: " + err.message, "err");
+  }
+}
+
+function resetSession() {
+  if (pc) {
+    try { pc.close(); } catch (e) {}
+    pc = null;
+  }
+  channel = null;
+  isOfferer = false;
+  iceRestarting = false;
+  makingNegOffer = false;
+  negBusy = false;
+  negQueued = false;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+
+  stopVoice();
+  remoteVoiceStream = new MediaStream();
+  const audio = document.getElementById("remoteAudio");
+  if (audio) audio.srcObject = null;
+
+  ["offerBox", "offerBoxQR", "answerBox", "answerBoxQR", "chatInput"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+
+  const chat = document.getElementById("chatBox");
+  if (chat) chat.innerHTML = '<div class="chat-empty">No messages yet. Connect to start chatting.</div>';
+
+  updateProgress(0, "—");
+  setTransferControls(false);
+  setConnectionBtns(true);
+  setStatus("Not connected", "idle");
+  setRole("none");
+  showReconnectPanel(false);
+  onModeChange();
+  log("Session reset. Choose roles again (A: Create Offer, B: Generate Answer).", "warn");
+}
+
 // ── Reconnect UI ──────────────────────────────────────────────────────────────
 function showReconnectPanel(show) {
   const panel = document.getElementById("reconnectPanel");
@@ -158,6 +407,7 @@ async function manualReconnect() {
   setStatus("Reconnecting…", "connecting");
 
   try {
+    setRole("A");
     // Create fresh peer — keeps all ICE servers so it works on any network
     createPeer();
     channel = pc.createDataChannel("file");
@@ -318,12 +568,29 @@ function createPeer() {
     if (e.errorCode !== 701) log("ICE error " + e.errorCode, "warn");
   };
 
+  pc.ontrack = (e) => {
+    if (!e.track) return;
+    remoteVoiceStream.addTrack(e.track);
+    const audio = document.getElementById("remoteAudio");
+    if (audio && audio.srcObject !== remoteVoiceStream) {
+      audio.srcObject = remoteVoiceStream;
+    }
+    unlockRemoteAudio();
+  };
+
+  pc.onnegotiationneeded = async () => {
+    if (!channel || channel.readyState !== "open") return;
+    if (pc.signalingState !== "stable") return;
+    await sendRenegotiationOffer();
+  };
+
   pc.ondatachannel = (e) => { channel = e.channel; setupChannel(); };
 }
 
 // ── Data channel ──────────────────────────────────────────────────────────────
 function setupChannel() {
   channel.binaryType = "arraybuffer";
+  channel.bufferedAmountLowThreshold = BUFFERED_LOW_WATERMARK;
 
   channel.onopen = () => {
     log("Channel open — ready!", "ok");
@@ -332,6 +599,7 @@ function setupChannel() {
     setConnectionBtns(true);
     showReconnectPanel(false);
     iceRestarting = false;
+    unlockRemoteAudio();
   };
 
   channel.onclose = () => {
@@ -346,7 +614,11 @@ function setupChannel() {
     if (typeof e.data !== "string") {
       // Binary file chunk
       if (e.data instanceof ArrayBuffer) {
-        receivedChunks.push(e.data);
+        if (incomingWritable) {
+          await incomingWritable.write(new Uint8Array(e.data));
+        } else {
+          receivedChunks.push(e.data);
+        }
         receivedBytes += e.data.byteLength;
         if (incomingFileInfo)
           updateProgress(Math.min(100, (receivedBytes / incomingFileInfo.size) * 100), "Receiving…");
@@ -387,12 +659,54 @@ function setupChannel() {
       return;
     }
 
+    if (e.data.startsWith("NEG_OFFER:")) {
+      try {
+        const offerSdp = decompress(e.data.slice(10));
+        const collision = makingNegOffer || pc.signalingState !== "stable";
+        const polite = !isOfferer;
+        if (collision && !polite) {
+          log("Ignoring colliding renegotiation offer.", "warn");
+          return;
+        }
+
+        await pc.setRemoteDescription(offerSdp);
+        await pc.setLocalDescription(await pc.createAnswer());
+        await waitIce();
+        channel.send("NEG_ANSWER:" + compress(pc.localDescription));
+        log("Renegotiation answer sent.", "ok");
+      } catch (err) {
+        log("Renegotiation offer handling failed: " + err.message, "err");
+      }
+      return;
+    }
+
+    if (e.data.startsWith("NEG_ANSWER:")) {
+      try {
+        const answerSdp = decompress(e.data.slice(11));
+        await pc.setRemoteDescription(answerSdp);
+        log("Renegotiation complete.", "ok");
+      } catch (err) {
+        log("Renegotiation answer handling failed: " + err.message, "err");
+      }
+      return;
+    }
+
     // ── Normal messages ───────────────────────────────────────────────────
     if (e.data.startsWith("MSG:"))  { addChat("peer", e.data.slice(4)); return; }
 
     if (e.data.startsWith("META:")) {
       incomingFileInfo = JSON.parse(e.data.slice(5));
       receivedChunks = []; receivedBytes = 0;
+      incomingWritable = null;
+      if (saveDirectoryHandle) {
+        try {
+          const fileHandle = await saveDirectoryHandle.getFileHandle(incomingFileInfo.name, { create: true });
+          incomingWritable = await fileHandle.createWritable();
+        } catch (err) {
+          log("Disk streaming unavailable for this file: " + err.message, "warn");
+          incomingWritable = null;
+        }
+      }
       log("Incoming: " + incomingFileInfo.name + " (" + fmtBytes(incomingFileInfo.size) + ")");
       updateProgress(0, "Receiving…");
       return;
@@ -402,30 +716,45 @@ function setupChannel() {
   };
 }
 
-// ── ICE wait: smart 2s timeout ────────────────────────────────────────────────
+// ── ICE wait: resolve only when gathering is fully complete ──────────────────
 function waitIce() {
   return new Promise((resolve) => {
-    if (pc.iceGatheringState === "complete") { resolve(); return; }
-    let done = false;
-    function finish(reason) {
-      if (done) return; done = true;
+    if (!pc || pc.iceGatheringState === "complete") { resolve(); return; }
+    let finished = false;
+
+    function finish() {
+      if (finished) return;
+      finished = true;
+      if (!pc) { resolve(); return; }
       pc.removeEventListener("icegatheringstatechange", onState);
-      pc.removeEventListener("icecandidate", onCand);
-      clearTimeout(t);
-      log("ICE ready (" + reason + ").");
+      pc.removeEventListener("icecandidate", onCandidate);
+      log("ICE ready (complete).");
       resolve();
     }
-    function onState() { if (pc.iceGatheringState === "complete") finish("complete"); }
-    function onCand(e) { if (e.candidate && e.candidate.type === "relay") finish("relay found"); }
-    const t = setTimeout(() => finish("2s timeout"), 2000);
+
+    function onState() {
+      if (pc && pc.iceGatheringState === "complete") finish();
+    }
+
+    function onCandidate(e) {
+      // Per WebRTC spec, null candidate indicates end of gathering.
+      if (!e.candidate) finish();
+    }
+
     pc.addEventListener("icegatheringstatechange", onState);
-    pc.addEventListener("icecandidate", onCand);
+    pc.addEventListener("icecandidate", onCandidate);
   });
 }
 
 // ── Create offer ──────────────────────────────────────────────────────────────
 async function createOffer() {
+  if (peerRole === "B") {
+    log("Role is locked to Peer B. Click Reset to switch to Peer A.", "warn");
+    return;
+  }
+
   try {
+    setRole("A");
     setConnectionBtns(false);
     setStatus("Gathering candidates…", "connecting");
     log("Creating offer…");
@@ -438,12 +767,12 @@ async function createOffer() {
 
     const sdp = pc.localDescription;
 
-    if (getMode() === "relay") {
+    if (getMode() === "qr") {
       log("Uploading offer to relay…");
       const id = await uploadToRelay(sdp);
       log("Offer uploaded. Code: " + id, "ok");
-      const disp = document.getElementById("offerShortDisplay");
-      disp.textContent = formatCode(id); disp.style.display = "block";
+      document.getElementById("offerBox").value = id;
+      document.getElementById("offerBoxQR").value = formatCode(id);
       showQR("offerQR", id);
       setStatus("Share offer code with Peer B", "connecting");
     } else {
@@ -462,15 +791,21 @@ async function createOffer() {
 
 // ── Generate answer ───────────────────────────────────────────────────────────
 async function acceptOffer() {
+  if (peerRole === "A") {
+    log("Role is locked to Peer A. Click Reset to switch to Peer B.", "warn");
+    return;
+  }
+
   try {
+    setRole("B");
     setConnectionBtns(false);
     setStatus("Processing offer…", "connecting");
     log("Generating answer…");
     isOfferer = false;         // this peer waits for ICE restart offers
 
     let sdp;
-    if (getMode() === "relay") {
-      const id = document.getElementById("offerShortInput").value.trim().replace(/\s+/g,"");
+    if (getMode() === "qr") {
+      const id = getRelayInputValue("offerBoxQR", "offerBox");
       if (!id) { log("Enter the offer code.", "warn"); setConnectionBtns(true); return; }
       log("Fetching offer from relay…");
       sdp = await downloadFromRelay(id);
@@ -487,12 +822,12 @@ async function acceptOffer() {
 
     const answerSdp = pc.localDescription;
 
-    if (getMode() === "relay") {
+    if (getMode() === "qr") {
       log("Uploading answer to relay…");
       const id = await uploadToRelay(answerSdp);
       log("Answer uploaded. Code: " + id, "ok");
-      const disp = document.getElementById("answerShortDisplay");
-      disp.textContent = formatCode(id); disp.style.display = "block";
+      document.getElementById("answerBox").value = id;
+      document.getElementById("answerBoxQR").value = formatCode(id);
       showQR("answerQR", id);
       setStatus("Share answer code with Peer A", "connecting");
     } else {
@@ -515,9 +850,21 @@ async function acceptAnswer() {
     setConnectionBtns(false);
     log("Connecting…");
 
+    if (peerRole === "B") {
+      log("Role is locked to Peer B. Peer A should click Connect.", "warn");
+      setConnectionBtns(true);
+      return;
+    }
+
+    if (!pc || pc.signalingState === "closed") {
+      log("No active offer session. Click Create Offer first, then paste/scan answer.", "warn");
+      setConnectionBtns(true);
+      return;
+    }
+
     let sdp;
-    if (getMode() === "relay") {
-      const id = document.getElementById("answerShortInput").value.trim().replace(/\s+/g,"");
+    if (getMode() === "qr") {
+      const id = getRelayInputValue("answerBoxQR", "answerBox");
       if (!id) { log("Enter the answer code.", "warn"); setConnectionBtns(true); return; }
       log("Fetching answer from relay…");
       sdp = await downloadFromRelay(id);
@@ -546,13 +893,31 @@ async function sendFile() {
   log("Sending: " + file.name + " (" + fmtBytes(file.size) + ")");
   channel.send("META:" + JSON.stringify({ name: file.name, size: file.size, type: file.type || "application/octet-stream" }));
 
-  const buf = await file.arrayBuffer();
-  let offset = 0;
-  while (offset < buf.byteLength) {
-    if (channel.bufferedAmount > 1_000_000) { await new Promise(r => setTimeout(r, 20)); continue; }
-    channel.send(buf.slice(offset, offset + CHUNK_SIZE));
-    offset += CHUNK_SIZE;
-    updateProgress(Math.min(100, (offset / file.size) * 100), "Sending…");
+  const reader = file.stream().getReader();
+  let sent = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value || !value.byteLength) continue;
+
+    let start = 0;
+    while (start < value.byteLength) {
+      const end = Math.min(start + CHUNK_SIZE, value.byteLength);
+      const chunk = value.slice(start, end);
+
+      if (channel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+        await waitForBufferedLow();
+      }
+      channel.send(chunk);
+      sent += chunk.byteLength;
+      start = end;
+      updateProgress(Math.min(100, (sent / file.size) * 100), "Sending…");
+    }
+  }
+
+  if (channel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+    await waitForBufferedLow();
   }
   channel.send("EOF");
   updateProgress(100, "Sent ✓");
@@ -561,15 +926,34 @@ async function sendFile() {
 
 // ── File receive ──────────────────────────────────────────────────────────────
 function finalizeDownload() {
-  const blob = new Blob(receivedChunks, { type: incomingFileInfo?.type || "application/octet-stream" });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement("a");
-  a.href = url; a.download = incomingFileInfo?.name || "file";
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-  updateProgress(100, "Received: " + (incomingFileInfo?.name || "file"));
-  log("Received: " + (incomingFileInfo?.name || "file"), "ok");
-  receivedChunks = []; receivedBytes = 0; incomingFileInfo = null;
+  const done = async () => {
+    if (incomingWritable) {
+      await incomingWritable.close();
+      incomingWritable = null;
+      updateProgress(100, "Saved to disk: " + (incomingFileInfo?.name || "file"));
+      log("Received and saved: " + (incomingFileInfo?.name || "file"), "ok");
+      receivedChunks = []; receivedBytes = 0; incomingFileInfo = null;
+      return;
+    }
+
+    const blob = new Blob(receivedChunks, { type: incomingFileInfo?.type || "application/octet-stream" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = incomingFileInfo?.name || "file";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+
+    // Clear buffered chunks immediately after triggering the download.
+    receivedChunks = []; receivedBytes = 0; incomingFileInfo = null;
+
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    updateProgress(100, "Received");
+    log("Received file.", "ok");
+  };
+
+  done().catch((err) => {
+    log("Finalize receive failed: " + err.message, "err");
+    receivedChunks = []; receivedBytes = 0; incomingFileInfo = null; incomingWritable = null;
+  });
 }
 
 // ── Progress ──────────────────────────────────────────────────────────────────
@@ -608,11 +992,15 @@ function addChat(who, msg) {
 
 // ── Copy ──────────────────────────────────────────────────────────────────────
 function copyOffer() {
-  const v = document.getElementById("offerBox").value;
+  const v = getMode() === "qr"
+    ? getRelayInputValue("offerBoxQR", "offerBox")
+    : document.getElementById("offerBox").value;
   if (v) navigator.clipboard.writeText(v).then(() => flash("copyOfferBtn", "Copied!"));
 }
 function copyAnswer() {
-  const v = document.getElementById("answerBox").value;
+  const v = getMode() === "qr"
+    ? getRelayInputValue("answerBoxQR", "answerBox")
+    : document.getElementById("answerBox").value;
   if (v) navigator.clipboard.writeText(v).then(() => flash("copyAnswerBtn", "Copied!"));
 }
 
@@ -621,7 +1009,16 @@ document.getElementById("chatInput").addEventListener("keydown", function(e) {
   if (e.key === "Enter") sendMessage();
 });
 
+["btnCreateOffer","btnGenAnswer","btnConnect","startVoiceBtn"].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("click", unlockRemoteAudio);
+});
+
+setVoiceUi("idle");
+setRole("none");
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 setTransferControls(false);
 setStatus("Not connected", "idle");
 log("PeerDrop 95 ready. Select a mode and click Create Offer to begin.");
+onModeChange();
