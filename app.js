@@ -36,28 +36,57 @@ function setupChannel() {
   channel.binaryType = "arraybuffer";
 
   channel.onmessage = (e) => {
-    if (typeof e.data === "string") {
 
-      if (e.data.startsWith("META:")) {
-        incomingFileInfo = JSON.parse(e.data.replace("META:", ""));
-        receivedChunks = [];
-        return;
-      }
-
-      if (e.data === "EOF") {
-        finalizeDownload();
-        return;
-      }
+    // TEXT MESSAGE
+    if (typeof e.data === "string" && e.data.startsWith("MSG:")) {
+      addChat("User B", e.data.replace("MSG:", ""));
+      return;
     }
 
+    // FILE META
+    if (typeof e.data === "string" && e.data.startsWith("META:")) {
+      incomingFileInfo = JSON.parse(e.data.replace("META:", ""));
+      receivedChunks = [];
+      return;
+    }
+
+    // FILE END
+    if (e.data === "EOF") {
+      finalizeDownload();
+      return;
+    }
+
+    // FILE CHUNKS
     receivedChunks.push(e.data);
 
     if (incomingFileInfo) {
-      let receivedSize = receivedChunks.length * CHUNK_SIZE;
-      let percent = (receivedSize / incomingFileInfo.size) * 100;
+      let percent = (receivedChunks.length * CHUNK_SIZE / incomingFileInfo.size) * 100;
       updateProgress(percent);
     }
   };
+}
+
+// ---------- CHAT ----------
+function sendMessage() {
+  const input = document.getElementById("chatInput");
+  const msg = input.value;
+
+  if (!msg || !channel) return;
+
+  channel.send("MSG:" + msg);
+  addChat("User A", msg);
+
+  input.value = "";
+}
+
+function addChat(user, msg) {
+  const box = document.getElementById("chatBox");
+  const div = document.createElement("div");
+
+  div.innerText = user + " - " + msg;
+
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
 }
 
 // ---------- Offer ----------
@@ -111,7 +140,7 @@ function waitIce() {
   });
 }
 
-// ---------- File Send ----------
+// ---------- FILE SEND ----------
 async function sendFile() {
   const file = document.getElementById("fileInput").files[0];
   if (!file) return alert("Select file");
@@ -141,7 +170,7 @@ async function sendFile() {
   channel.send("EOF");
 }
 
-// ---------- Receive ----------
+// ---------- FILE RECEIVE ----------
 function finalizeDownload() {
   const blob = new Blob(receivedChunks);
   const url = URL.createObjectURL(blob);
@@ -155,13 +184,13 @@ function finalizeDownload() {
   incomingFileInfo = null;
 }
 
-// ---------- Progress ----------
+// ---------- PROGRESS ----------
 function updateProgress(p) {
   document.getElementById("progress").innerText =
     Math.min(100, Math.round(p)) + "%";
 }
 
-// ---------- Copy ----------
+// ---------- COPY ----------
 function copyOffer() {
   navigator.clipboard.writeText(document.getElementById("offerBox").value);
 }
