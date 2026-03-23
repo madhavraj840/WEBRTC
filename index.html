@@ -1,83 +1,264 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>WebRTC File Transfer</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PeerDrop 95 - P2P File Transfer</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<h2>File Transfer Utility</h2>
+<div class="desktop">
 
-<div class="window">
-  <div class="title">Instructions</div>
-  <div class="content">
-    <b>User A</b>: Create Offer → Send<br>
-    <b>User B</b>: Paste → Generate Answer → Send back<br>
-    <b>User A</b>: Paste Answer → Connect<br>
+  <!-- DESKTOP ICONS -->
+  <div class="desktop-icons">
+    <div class="desktop-icon"><div class="icon-img">📡</div><div class="icon-label">PeerDrop 95</div></div>
+    <div class="desktop-icon"><div class="icon-img">🗑️</div><div class="icon-label">Recycle Bin</div></div>
+    <div class="desktop-icon"><div class="icon-img">💾</div><div class="icon-label">My Files</div></div>
   </div>
-</div>
 
-<div class="window">
-  <div class="title">Connection</div>
-  <div class="content">
-    <button onclick="createOffer()">Create Offer</button>
-    <button onclick="acceptOffer()">Generate Answer</button>
-    <button onclick="acceptAnswer()">Connect</button>
-    <p>Status: <span id="status">Idle</span></p>
-  </div>
-</div>
+  <!-- MAIN WINDOW -->
+  <div class="win95-window main-window">
 
-<div class="window">
-  <div class="title">Offer</div>
-  <div class="content">
-    <textarea id="offerBox" placeholder="Paste Offer here"></textarea>
-    <button onclick="copyOffer()">Copy Offer</button>
-  </div>
-</div>
+    <!-- Title bar -->
+    <div class="win95-titlebar">
+      <div class="titlebar-left">
+        <span class="titlebar-icon">📡</span>
+        <span class="titlebar-text">PeerDrop 95 — P2P File &amp; Chat Transfer</span>
+      </div>
+      <div class="titlebar-btns">
+        <button class="titlebar-btn">_</button>
+        <button class="titlebar-btn">□</button>
+        <button class="titlebar-btn titlebar-close">✕</button>
+      </div>
+    </div>
 
-<div class="window">
-  <div class="title">Answer</div>
-  <div class="content">
-    <textarea id="answerBox" placeholder="Paste Answer here"></textarea>
-    <button onclick="copyAnswer()">Copy Answer</button>
-  </div>
-</div>
+    <!-- Menu bar -->
+    <div class="win95-menubar">
+      <span class="menu-item">File</span>
+      <span class="menu-item">Edit</span>
+      <span class="menu-item">View</span>
+      <span class="menu-item">Connection</span>
+      <span class="menu-item">Help</span>
+    </div>
 
-<div class="window">
-  <div class="title">Code Mode</div>
-  <div class="content">
-    <select id="mode">
-      <option value="base64">Base64</option>
-      <option value="qr">QR</option>
-    </select>
-    <div id="qr"></div>
-  </div>
-</div>
+    <!-- Toolbar -->
+    <div class="win95-toolbar">
+      <button class="toolbar-btn" onclick="createOffer()">
+        <span class="toolbar-icon">📤</span><span>New Offer</span>
+      </button>
+      <div class="toolbar-sep"></div>
+      <button class="toolbar-btn" onclick="acceptOffer()">
+        <span class="toolbar-icon">📥</span><span>Gen Answer</span>
+      </button>
+      <div class="toolbar-sep"></div>
+      <button class="toolbar-btn" onclick="acceptAnswer()">
+        <span class="toolbar-icon">🔌</span><span>Connect</span>
+      </button>
+      <div class="toolbar-sep"></div>
+      <button class="toolbar-btn" id="sendFileBtn" onclick="sendFile()" disabled>
+        <span class="toolbar-icon">📁</span><span>Send File</span>
+      </button>
+      <div class="toolbar-spacer"></div>
+      <div class="toolbar-status">
+        <div id="statusLight" class="status-light status-idle"></div>
+        <span id="statusText">Not connected</span>
+      </div>
+    </div>
 
-<div class="window">
-  <div class="title">File Transfer</div>
-  <div class="content">
-    <input type="file" id="fileInput">
-    <button onclick="sendFile()">Send File</button>
-    <p>Progress: <span id="progress">0%</span></p>
-  </div>
-</div>
+    <!-- Window body -->
+    <div class="win95-body">
 
-<!-- 🔥 NEW CHAT SECTION -->
-<div class="window">
-  <div class="title">Text Chat</div>
-  <div class="content">
+      <!-- ─ INSTRUCTIONS ──────────────────────────────────── -->
+      <fieldset class="win95-fieldset">
+        <legend>📋 How to Connect — Read this first!</legend>
+        <div class="instructions-grid">
+          <div class="instr-step">
+            <div class="instr-num">1</div>
+            <div class="instr-content">
+              <div class="instr-who">Peer A</div>
+              Click <b>"New Offer"</b> (toolbar or below). Copy the code from the <b>Offer Box</b> and send it to Peer B by any means (email, Slack, etc.).
+            </div>
+          </div>
+          <div class="instr-arrow">►</div>
+          <div class="instr-step">
+            <div class="instr-num">2</div>
+            <div class="instr-content">
+              <div class="instr-who">Peer B</div>
+              Paste Peer A's code into the <b>Offer Box</b>. Click <b>"Gen Answer"</b>. Copy the answer code and send it back to Peer A.
+            </div>
+          </div>
+          <div class="instr-arrow">►</div>
+          <div class="instr-step">
+            <div class="instr-num">3</div>
+            <div class="instr-content">
+              <div class="instr-who">Peer A</div>
+              Paste Peer B's code into the <b>Answer Box</b>. Click <b>"Connect"</b>. Status will change to <span class="instr-connected">Connected</span>.
+            </div>
+          </div>
+          <div class="instr-arrow">►</div>
+          <div class="instr-step">
+            <div class="instr-num">4</div>
+            <div class="instr-content">
+              <div class="instr-who">Both peers</div>
+              Use <b>File Transfer</b> and <b>Chat</b> below. Data goes peer-to-peer — <b>no server or upload required!</b>
+            </div>
+          </div>
+        </div>
+        <div class="instr-warning">⚠ Both peers must have this page open simultaneously. For cross-network use, a TURN relay server may be required.</div>
+      </fieldset>
 
-    <div id="chatBox" style="height:150px; overflow:auto; border:2px solid black; padding:5px; background:white;"></div>
+      <!-- ─ TWO COLUMN LAYOUT ─────────────────────────────── -->
+      <div class="two-col">
 
-    <input type="text" id="chatInput" placeholder="Type message" style="width:80%;">
-    <button onclick="sendMessage()">Send</button>
+        <!-- LEFT COL -->
+        <div class="left-col">
 
+          <!-- Connection buttons -->
+          <fieldset class="win95-fieldset">
+            <legend>🔌 Connection</legend>
+            <div class="btn-row">
+              <button class="win95-btn" onclick="createOffer()">Create Offer</button>
+              <button class="win95-btn" onclick="acceptOffer()">Generate Answer</button>
+              <button class="win95-btn btn-default" onclick="acceptAnswer()">Connect</button>
+            </div>
+          </fieldset>
+
+          <!-- Offer box -->
+          <fieldset class="win95-fieldset">
+            <legend>📤 Offer Code &nbsp;<small>(Peer A creates → sends to Peer B)</small></legend>
+            <textarea id="offerBox" class="win95-textarea" placeholder="Offer code appears here after clicking Create Offer..." readonly></textarea>
+            <div class="btn-row field-gap">
+              <button class="win95-btn" id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
+              <label class="inline-label">Mode:
+                <select id="mode" class="win95-select">
+                  <option value="base64">Text / Copy</option>
+                  <option value="qr">QR Code</option>
+                </select>
+              </label>
+            </div>
+            <div id="qr" class="qr-area"></div>
+          </fieldset>
+
+          <!-- Answer box -->
+          <fieldset class="win95-fieldset">
+            <legend>📥 Answer Code &nbsp;<small>(Peer B creates → sends to Peer A)</small></legend>
+            <textarea id="answerBox" class="win95-textarea" placeholder="Paste answer code here..."></textarea>
+            <div class="btn-row field-gap">
+              <button class="win95-btn" id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
+            </div>
+          </fieldset>
+
+          <!-- Log -->
+          <fieldset class="win95-fieldset">
+            <legend>📋 Event Log</legend>
+            <div id="logBox" class="win95-log"></div>
+          </fieldset>
+
+        </div><!-- /left-col -->
+
+        <!-- RIGHT COL -->
+        <div class="right-col">
+
+          <!-- File transfer -->
+          <fieldset class="win95-fieldset">
+            <legend>📁 File Transfer</legend>
+            <p class="field-hint">Connect first, then select a file and click Send File.</p>
+            <div class="file-row">
+              <input type="file" id="fileInput" class="win95-file" disabled>
+            </div>
+            <div class="btn-row field-gap">
+              <button class="win95-btn btn-default" id="sendFileBtnMain" onclick="sendFile()" disabled>Send File</button>
+            </div>
+            <div class="field-gap">
+              <div class="progress-row">
+                <span class="progress-prefix">Progress:</span>
+                <span id="progressLabel" class="progress-pct">—</span>
+              </div>
+              <div class="win95-progress-track">
+                <div id="progressBar" class="win95-progress-bar" style="width:0%"></div>
+              </div>
+            </div>
+          </fieldset>
+
+          <!-- Chat -->
+          <fieldset class="win95-fieldset chat-fieldset">
+            <legend>💬 Text Chat &nbsp;<small>(press Enter to send)</small></legend>
+            <p class="field-hint">Connect first. Messages go over the same P2P channel — no server.</p>
+
+            <div id="chatBox" class="win95-chatbox">
+              <div class="chat-placeholder">No messages yet. Connect to start chatting.</div>
+            </div>
+
+            <div class="chat-input-row field-gap">
+              <input type="text" id="chatInput" class="win95-input" placeholder="Type a message and press Enter..." disabled autocomplete="off">
+              <button class="win95-btn btn-default" id="sendMsgBtn" onclick="sendMessage()" disabled>Send</button>
+            </div>
+          </fieldset>
+
+        </div><!-- /right-col -->
+
+      </div><!-- /two-col -->
+
+    </div><!-- /win95-body -->
+
+    <!-- Win95 status bar -->
+    <div class="win95-statusbar">
+      <div class="sb-pane sb-pane-main">PeerDrop 95 v1.0</div>
+      <div class="sb-pane sb-pane-mid">WebRTC — No server required</div>
+      <div class="sb-pane sb-pane-right" id="sbRight">Idle</div>
+    </div>
+
+  </div><!-- /main-window -->
+
+</div><!-- /desktop -->
+
+<!-- TASKBAR -->
+<div class="taskbar">
+  <button class="start-btn"><span>⊞</span> Start</button>
+  <div class="taskbar-divider"></div>
+  <div class="taskbar-task active-task"><span>📡</span> PeerDrop 95</div>
+  <div class="taskbar-spacer"></div>
+  <div class="system-tray">
+    <span title="Volume">🔊</span>
+    <span title="Network">🌐</span>
+    <span class="tray-time" id="trayTime"></span>
   </div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="app.js"></script>
+<script>
+  // Sync both sendFile buttons
+  const origSendFile = window.sendFile;
+  document.getElementById("sendFileBtnMain").addEventListener("click", sendFile);
+
+  // Mirror disabled state of sendFileBtn to sendFileBtnMain
+  const observer = new MutationObserver(() => {
+    const src = document.getElementById("sendFileBtn");
+    const dst = document.getElementById("sendFileBtnMain");
+    if (src && dst) dst.disabled = src.disabled;
+  });
+  const sfb = document.getElementById("sendFileBtn");
+  if (sfb) observer.observe(sfb, { attributes: true });
+
+  // Clock
+  function tick() {
+    document.getElementById("trayTime").textContent =
+      new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  tick(); setInterval(tick, 10000);
+
+  // Mirror status to statusbar right pane
+  document.addEventListener("DOMContentLoaded", () => {
+    const stEl = document.getElementById("statusText");
+    const sbEl = document.getElementById("sbRight");
+    if (stEl && sbEl) {
+      new MutationObserver(() => sbEl.textContent = stEl.textContent)
+        .observe(stEl, { childList: true, characterData: true, subtree: true });
+    }
+  });
+</script>
 
 </body>
 </html>
