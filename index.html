@@ -8,257 +8,109 @@
 </head>
 <body>
 
-<div class="desktop">
+<div class="window">
 
-  <!-- DESKTOP ICONS -->
-  <div class="desktop-icons">
-    <div class="desktop-icon"><div class="icon-img">📡</div><div class="icon-label">PeerDrop 95</div></div>
-    <div class="desktop-icon"><div class="icon-img">🗑️</div><div class="icon-label">Recycle Bin</div></div>
-    <div class="desktop-icon"><div class="icon-img">💾</div><div class="icon-label">My Files</div></div>
+  <div class="titlebar">
+    <span>📡 PeerDrop 95 — P2P File &amp; Chat Transfer</span>
+    <div class="titlebar-btns">
+      <button>_</button>
+      <button>□</button>
+      <button>✕</button>
+    </div>
   </div>
 
-  <!-- MAIN WINDOW -->
-  <div class="win95-window main-window">
+  <div class="body">
 
-    <!-- Title bar -->
-    <div class="win95-titlebar">
-      <div class="titlebar-left">
-        <span class="titlebar-icon">📡</span>
-        <span class="titlebar-text">PeerDrop 95 — P2P File &amp; Chat Transfer</span>
+    <!-- Instructions -->
+    <fieldset>
+      <legend>How to connect</legend>
+      <div class="steps">
+        <div class="step"><span class="step-num">1</span><div><b>Peer A:</b> Click <b>Create Offer</b>. Copy the code from the Offer box and send it to Peer B (email, chat, etc.).</div></div>
+        <div class="step"><span class="step-num">2</span><div><b>Peer B:</b> Paste the code into the Offer box. Click <b>Generate Answer</b>. Copy the answer and send it back to Peer A.</div></div>
+        <div class="step"><span class="step-num">3</span><div><b>Peer A:</b> Paste the answer into the Answer box. Click <b>Connect</b>. Status will change to <b class="ok">Connected</b>.</div></div>
       </div>
-      <div class="titlebar-btns">
-        <button class="titlebar-btn">_</button>
-        <button class="titlebar-btn">□</button>
-        <button class="titlebar-btn titlebar-close">✕</button>
+      <p class="warning">⚠ Both peers must have this page open at the same time. For cross-network use, a TURN relay server may be required.</p>
+    </fieldset>
+
+    <div class="cols">
+
+      <!-- LEFT -->
+      <div class="col">
+
+        <fieldset>
+          <legend>Connection</legend>
+          <div class="status-row">
+            <span id="statusDot" class="dot dot-idle"></span>
+            <span id="statusText">Not connected</span>
+          </div>
+          <div class="btn-row">
+            <button onclick="createOffer()">Create Offer</button>
+            <button onclick="acceptOffer()">Generate Answer</button>
+            <button onclick="acceptAnswer()">Connect</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Offer Code <small>— Peer A copies this and sends to Peer B</small></legend>
+          <textarea id="offerBox" placeholder="Offer code appears here after clicking Create Offer…" spellcheck="false"></textarea>
+          <button id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Answer Code <small>— Peer B copies this and sends to Peer A</small></legend>
+          <textarea id="answerBox" placeholder="Paste answer code here…" spellcheck="false"></textarea>
+          <button id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
+        </fieldset>
+
+        <fieldset>
+          <legend>Event Log</legend>
+          <div id="logBox" class="log"></div>
+        </fieldset>
+
+      </div>
+
+      <!-- RIGHT -->
+      <div class="col">
+
+        <fieldset>
+          <legend>File Transfer</legend>
+          <p class="hint">Connect first, then pick a file and send.</p>
+          <input type="file" id="fileInput" disabled>
+          <button id="sendFileBtn" onclick="sendFile()" disabled>Send File</button>
+          <div class="progress-wrap">
+            <div class="progress-track">
+              <div id="progressBar" class="progress-bar" style="width:0%"></div>
+            </div>
+            <span id="progressLabel" class="progress-label">—</span>
+          </div>
+        </fieldset>
+
+        <fieldset class="chat-fieldset">
+          <legend>Text Chat <small>— press Enter to send</small></legend>
+          <p class="hint">Connect first. Messages go directly peer-to-peer, no server.</p>
+          <div id="chatBox" class="chat">
+            <div class="chat-empty">No messages yet. Connect to start chatting.</div>
+          </div>
+          <div class="chat-row">
+            <input type="text" id="chatInput" placeholder="Type a message…" disabled autocomplete="off">
+            <button id="sendMsgBtn" onclick="sendMessage()" disabled>Send</button>
+          </div>
+        </fieldset>
+
       </div>
     </div>
 
-    <!-- Menu bar -->
-    <div class="win95-menubar">
-      <span class="menu-item">File</span>
-      <span class="menu-item">Edit</span>
-      <span class="menu-item">View</span>
-      <span class="menu-item">Connection</span>
-      <span class="menu-item">Help</span>
-    </div>
-
-    <!-- Toolbar -->
-    <div class="win95-toolbar">
-      <button class="toolbar-btn" onclick="createOffer()">
-        <span class="toolbar-icon">📤</span><span>New Offer</span>
-      </button>
-      <div class="toolbar-sep"></div>
-      <button class="toolbar-btn" onclick="acceptOffer()">
-        <span class="toolbar-icon">📥</span><span>Gen Answer</span>
-      </button>
-      <div class="toolbar-sep"></div>
-      <button class="toolbar-btn" onclick="acceptAnswer()">
-        <span class="toolbar-icon">🔌</span><span>Connect</span>
-      </button>
-      <div class="toolbar-sep"></div>
-      <button class="toolbar-btn" id="sendFileBtn" onclick="sendFile()" disabled>
-        <span class="toolbar-icon">📁</span><span>Send File</span>
-      </button>
-      <div class="toolbar-spacer"></div>
-      <div class="toolbar-status">
-        <div id="statusLight" class="status-light status-idle"></div>
-        <span id="statusText">Not connected</span>
-      </div>
-    </div>
-
-    <!-- Window body -->
-    <div class="win95-body">
-
-      <!-- ─ INSTRUCTIONS ──────────────────────────────────── -->
-      <fieldset class="win95-fieldset">
-        <legend>📋 How to Connect — Read this first!</legend>
-        <div class="instructions-grid">
-          <div class="instr-step">
-            <div class="instr-num">1</div>
-            <div class="instr-content">
-              <div class="instr-who">Peer A</div>
-              Click <b>"New Offer"</b> (toolbar or below). Copy the code from the <b>Offer Box</b> and send it to Peer B by any means (email, Slack, etc.).
-            </div>
-          </div>
-          <div class="instr-arrow">►</div>
-          <div class="instr-step">
-            <div class="instr-num">2</div>
-            <div class="instr-content">
-              <div class="instr-who">Peer B</div>
-              Paste Peer A's code into the <b>Offer Box</b>. Click <b>"Gen Answer"</b>. Copy the answer code and send it back to Peer A.
-            </div>
-          </div>
-          <div class="instr-arrow">►</div>
-          <div class="instr-step">
-            <div class="instr-num">3</div>
-            <div class="instr-content">
-              <div class="instr-who">Peer A</div>
-              Paste Peer B's code into the <b>Answer Box</b>. Click <b>"Connect"</b>. Status will change to <span class="instr-connected">Connected</span>.
-            </div>
-          </div>
-          <div class="instr-arrow">►</div>
-          <div class="instr-step">
-            <div class="instr-num">4</div>
-            <div class="instr-content">
-              <div class="instr-who">Both peers</div>
-              Use <b>File Transfer</b> and <b>Chat</b> below. Data goes peer-to-peer — <b>no server or upload required!</b>
-            </div>
-          </div>
-        </div>
-        <div class="instr-warning">⚠ Both peers must have this page open simultaneously. For cross-network use, a TURN relay server may be required.</div>
-      </fieldset>
-
-      <!-- ─ TWO COLUMN LAYOUT ─────────────────────────────── -->
-      <div class="two-col">
-
-        <!-- LEFT COL -->
-        <div class="left-col">
-
-          <!-- Connection buttons -->
-          <fieldset class="win95-fieldset">
-            <legend>🔌 Connection</legend>
-            <div class="btn-row">
-              <button class="win95-btn" onclick="createOffer()">Create Offer</button>
-              <button class="win95-btn" onclick="acceptOffer()">Generate Answer</button>
-              <button class="win95-btn btn-default" onclick="acceptAnswer()">Connect</button>
-            </div>
-          </fieldset>
-
-          <!-- Offer box -->
-          <fieldset class="win95-fieldset">
-            <legend>📤 Offer Code &nbsp;<small>(Peer A creates → sends to Peer B)</small></legend>
-            <textarea id="offerBox" class="win95-textarea" placeholder="Offer code appears here after clicking Create Offer..." readonly></textarea>
-            <div class="btn-row field-gap">
-              <button class="win95-btn" id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
-              <label class="inline-label">Mode:
-                <select id="mode" class="win95-select">
-                  <option value="base64">Text / Copy</option>
-                  <option value="qr">QR Code</option>
-                </select>
-              </label>
-            </div>
-            <div id="qr" class="qr-area"></div>
-          </fieldset>
-
-          <!-- Answer box -->
-          <fieldset class="win95-fieldset">
-            <legend>📥 Answer Code &nbsp;<small>(Peer B creates → sends to Peer A)</small></legend>
-            <textarea id="answerBox" class="win95-textarea" placeholder="Paste answer code here..."></textarea>
-            <div class="btn-row field-gap">
-              <button class="win95-btn" id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
-            </div>
-          </fieldset>
-
-          <!-- Log -->
-          <fieldset class="win95-fieldset">
-            <legend>📋 Event Log</legend>
-            <div id="logBox" class="win95-log"></div>
-          </fieldset>
-
-        </div><!-- /left-col -->
-
-        <!-- RIGHT COL -->
-        <div class="right-col">
-
-          <!-- File transfer -->
-          <fieldset class="win95-fieldset">
-            <legend>📁 File Transfer</legend>
-            <p class="field-hint">Connect first, then select a file and click Send File.</p>
-            <div class="file-row">
-              <input type="file" id="fileInput" class="win95-file" disabled>
-            </div>
-            <div class="btn-row field-gap">
-              <button class="win95-btn btn-default" id="sendFileBtnMain" onclick="sendFile()" disabled>Send File</button>
-            </div>
-            <div class="field-gap">
-              <div class="progress-row">
-                <span class="progress-prefix">Progress:</span>
-                <span id="progressLabel" class="progress-pct">—</span>
-              </div>
-              <div class="win95-progress-track">
-                <div id="progressBar" class="win95-progress-bar" style="width:0%"></div>
-              </div>
-            </div>
-          </fieldset>
-
-          <!-- Chat -->
-          <fieldset class="win95-fieldset chat-fieldset">
-            <legend>💬 Text Chat &nbsp;<small>(press Enter to send)</small></legend>
-            <p class="field-hint">Connect first. Messages go over the same P2P channel — no server.</p>
-
-            <div id="chatBox" class="win95-chatbox">
-              <div class="chat-placeholder">No messages yet. Connect to start chatting.</div>
-            </div>
-
-            <div class="chat-input-row field-gap">
-              <input type="text" id="chatInput" class="win95-input" placeholder="Type a message and press Enter..." disabled autocomplete="off">
-              <button class="win95-btn btn-default" id="sendMsgBtn" onclick="sendMessage()" disabled>Send</button>
-            </div>
-          </fieldset>
-
-        </div><!-- /right-col -->
-
-      </div><!-- /two-col -->
-
-    </div><!-- /win95-body -->
-
-    <!-- Win95 status bar -->
-    <div class="win95-statusbar">
-      <div class="sb-pane sb-pane-main">PeerDrop 95 v1.0</div>
-      <div class="sb-pane sb-pane-mid">WebRTC — No server required</div>
-      <div class="sb-pane sb-pane-right" id="sbRight">Idle</div>
-    </div>
-
-  </div><!-- /main-window -->
-
-</div><!-- /desktop -->
-
-<!-- TASKBAR -->
-<div class="taskbar">
-  <button class="start-btn"><span>⊞</span> Start</button>
-  <div class="taskbar-divider"></div>
-  <div class="taskbar-task active-task"><span>📡</span> PeerDrop 95</div>
-  <div class="taskbar-spacer"></div>
-  <div class="system-tray">
-    <span title="Volume">🔊</span>
-    <span title="Network">🌐</span>
-    <span class="tray-time" id="trayTime"></span>
   </div>
+
+  <div class="statusbar">
+    <span>PeerDrop 95 v1.0</span>
+    <span>WebRTC — No server required</span>
+    <span id="sbStatus">Not connected</span>
+  </div>
+
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="app.js"></script>
-<script>
-  // Sync both sendFile buttons
-  const origSendFile = window.sendFile;
-  document.getElementById("sendFileBtnMain").addEventListener("click", sendFile);
-
-  // Mirror disabled state of sendFileBtn to sendFileBtnMain
-  const observer = new MutationObserver(() => {
-    const src = document.getElementById("sendFileBtn");
-    const dst = document.getElementById("sendFileBtnMain");
-    if (src && dst) dst.disabled = src.disabled;
-  });
-  const sfb = document.getElementById("sendFileBtn");
-  if (sfb) observer.observe(sfb, { attributes: true });
-
-  // Clock
-  function tick() {
-    document.getElementById("trayTime").textContent =
-      new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  }
-  tick(); setInterval(tick, 10000);
-
-  // Mirror status to statusbar right pane
-  document.addEventListener("DOMContentLoaded", () => {
-    const stEl = document.getElementById("statusText");
-    const sbEl = document.getElementById("sbRight");
-    if (stEl && sbEl) {
-      new MutationObserver(() => sbEl.textContent = stEl.textContent)
-        .observe(stEl, { childList: true, characterData: true, subtree: true });
-    }
-  });
-</script>
 
 </body>
 </html>
