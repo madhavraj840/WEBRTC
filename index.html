@@ -25,9 +25,18 @@
     <fieldset>
       <legend>How to connect</legend>
       <div class="steps">
-        <div class="step"><span class="step-num">1</span><div><b>Peer A:</b> Click <b>Create Offer</b>. Copy the code from the Offer box and send it to Peer B (email, chat, etc.).</div></div>
-        <div class="step"><span class="step-num">2</span><div><b>Peer B:</b> Paste the code into the Offer box. Click <b>Generate Answer</b>. Copy the answer and send it back to Peer A.</div></div>
-        <div class="step"><span class="step-num">3</span><div><b>Peer A:</b> Paste the answer into the Answer box. Click <b>Connect</b>. Status will change to <b class="ok">Connected</b>.</div></div>
+        <div class="step">
+          <span class="step-num">1</span>
+          <div><b>Peer A:</b> Click <b>Create Offer</b>. Copy the code from the Offer box and send it to Peer B (email, chat, etc.).</div>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <div><b>Peer B:</b> Paste the code into the Offer box. Click <b>Generate Answer</b>. Copy the answer and send it back to Peer A.</div>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <div><b>Peer A:</b> Paste the answer into the Answer box. Click <b>Connect</b>. Status will change to <b class="ok">Connected</b>.</div>
+        </div>
       </div>
       <p class="warning">⚠ Both peers must have this page open at the same time. For cross-network use, a TURN relay server may be required.</p>
     </fieldset>
@@ -44,21 +53,29 @@
             <span id="statusText">Not connected</span>
           </div>
           <div class="btn-row">
-            <button onclick="createOffer()">Create Offer</button>
-            <button onclick="acceptOffer()">Generate Answer</button>
-            <button onclick="acceptAnswer()">Connect</button>
+            <!-- BUG FIX 4: IDs added so buttons can be disabled during async ops -->
+            <button id="btnCreateOffer" onclick="createOffer()">Create Offer</button>
+            <button id="btnGenAnswer"   onclick="acceptOffer()">Generate Answer</button>
+            <button id="btnConnect"     onclick="acceptAnswer()">Connect</button>
           </div>
         </fieldset>
 
         <fieldset>
           <legend>Offer Code <small>— Peer A copies this and sends to Peer B</small></legend>
-          <textarea id="offerBox" placeholder="Offer code appears here after clicking Create Offer…" spellcheck="false"></textarea>
+          <!--
+            BUG FIX 1: NO readonly attribute here.
+            This textarea is used by BOTH peers:
+            - Peer A: JS fills it with the generated offer code (can still copy it out)
+            - Peer B: must be able to paste Peer A's code in here
+            Any previous version that had readonly="readonly" would block Peer B from pasting.
+          -->
+          <textarea id="offerBox" placeholder="Peer A: offer code appears here after Create Offer. Peer B: paste Peer A's code here." spellcheck="false"></textarea>
           <button id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
         </fieldset>
 
         <fieldset>
           <legend>Answer Code <small>— Peer B copies this and sends to Peer A</small></legend>
-          <textarea id="answerBox" placeholder="Paste answer code here…" spellcheck="false"></textarea>
+          <textarea id="answerBox" placeholder="Peer B: answer code appears here after Generate Answer. Peer A: paste Peer B's code here." spellcheck="false"></textarea>
           <button id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
         </fieldset>
 
@@ -110,6 +127,7 @@
 
 </div>
 
+<!-- Script at bottom of body: DOM is ready, no DOMContentLoaded needed -->
 <script src="app.js"></script>
 
 </body>
