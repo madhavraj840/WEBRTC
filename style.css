@@ -432,3 +432,56 @@ input[type="file"]:disabled {
   border: 3px solid var(--dk);
   image-rendering: pixelated;
 }
+
+/* ── Reconnect panel ── */
+.reconnect-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fff8d0;
+  border-top:   2px solid #cc8800;
+  border-left:  2px solid #cc8800;
+  border-right: 2px solid #886600;
+  border-bottom:2px solid #886600;
+  animation: blink-border 1s step-end infinite;
+}
+
+@keyframes blink-border {
+  0%, 100% { border-color: #cc8800 #886600 #886600 #cc8800; }
+  50%       { border-color: #ff4400 #882200 #882200 #ff4400; }
+}
+
+.reconnect-icon {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.reconnect-body {
+  flex: 1;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #553300;
+}
+
+.reconnect-btn {
+  background: var(--face);
+  border-top:   2px solid var(--lt);
+  border-left:  2px solid var(--lt);
+  border-right: 2px solid var(--dkk);
+  border-bottom:2px solid var(--dkk);
+  padding: 4px 14px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: pointer;
+  color: #880000;
+  white-space: nowrap;
+}
+
+.reconnect-btn:active {
+  border-top:   2px solid var(--dkk);
+  border-left:  2px solid var(--dkk);
+  border-right: 2px solid var(--lt);
+  border-bottom:2px solid var(--lt);
+}

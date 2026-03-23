@@ -10,13 +10,9 @@
 
 <div class="window">
 
+  <!-- Title bar — no close/min/max buttons (removed) -->
   <div class="titlebar">
-    <span>📡 PeerDrop 95 — P2P File &amp; Chat Transfer</span>
-    <div class="titlebar-btns">
-      <button>_</button>
-      <button>□</button>
-      <button>✕</button>
-    </div>
+    <span>📡 PeerDrop 95 — P2P File, Chat &amp; Voice Transfer</span>
   </div>
 
   <div class="body">
@@ -27,25 +23,25 @@
       <div class="steps">
         <div class="step">
           <span class="step-num">1</span>
-          <div><b>Peer A:</b> Select a share mode below, then click <b>Create Offer</b>.</div>
+          <div><b>Peer A:</b> Choose share mode, click <b>Create Offer</b>. Copy the code or show the QR to Peer B.</div>
         </div>
         <div class="step">
           <span class="step-num">2</span>
-          <div><b>Peer B:</b> Enter the offer code or scan QR. Click <b>Generate Answer</b> and share the answer back.</div>
+          <div><b>Peer B:</b> Scan QR or paste the code into the Offer box. Click <b>Generate Answer</b>. Share the answer back to Peer A.</div>
         </div>
         <div class="step">
           <span class="step-num">3</span>
-          <div><b>Peer A:</b> Enter the answer code. Click <b>Connect</b>. Status changes to <b class="ok">Connected</b>.</div>
+          <div><b>Peer A:</b> Paste the answer. Click <b>Connect</b>. Status changes to <b class="ok">Connected</b>. Files, chat and voice are all ready.</div>
         </div>
       </div>
-      <p class="warning">⚠ Both peers must have this page open at the same time. For cross-network use, a TURN relay server may be required.</p>
+      <p class="warning">⚠ Both peers must keep this tab open. For cross-network use, TURN relay is used automatically. For large files (&gt;500 MB) use Chrome — it streams directly to disk without loading into RAM.</p>
     </fieldset>
 
     <div class="cols">
       <!-- LEFT -->
       <div class="col">
 
-        <!-- Connection + mode -->
+        <!-- Connection -->
         <fieldset>
           <legend>Connection</legend>
           <div class="status-row">
@@ -53,13 +49,12 @@
             <span id="statusText">Not connected</span>
           </div>
 
-          <!-- Share mode selector -->
           <div class="mode-row">
             <label class="mode-label">Share mode:</label>
             <label class="radio-lbl"><input type="radio" name="mode" value="text" checked onchange="onModeChange()"> Text (copy/paste)</label>
-            <label class="radio-lbl"><input type="radio" name="mode" value="relay" onchange="onModeChange()"> Short Code + QR</label>
+            <label class="radio-lbl"><input type="radio" name="mode" value="qr"   onchange="onModeChange()"> QR Code</label>
           </div>
-          <p id="modeHint" class="hint mode-hint">Copy/paste the code — works offline, no relay needed.</p>
+          <p id="modeHint" class="hint mode-hint">Copy/paste the code to the other device.</p>
 
           <div class="btn-row">
             <button id="btnCreateOffer" onclick="createOffer()">Create Offer</button>
@@ -71,48 +66,46 @@
         <!-- Offer -->
         <fieldset>
           <legend>Offer Code <small>— Peer A → Peer B</small></legend>
-
-          <!-- TEXT MODE: full code textarea -->
           <div id="offerTextArea">
             <textarea id="offerBox"
-              placeholder="Peer A: offer code appears here. Peer B: paste it here."
+              placeholder="Peer A: offer code appears here. Peer B: paste Peer A's code here."
               spellcheck="false"></textarea>
             <button id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
           </div>
-
-          <!-- RELAY MODE: short code display + input + QR -->
-          <div id="offerRelayArea" style="display:none">
-            <p class="hint">Peer A: your short code appears below — share it or show the QR.<br>
-               Peer B: type the code you received into the box below.</p>
-            <div id="offerShortDisplay" class="short-code-display" style="display:none"></div>
+          <div id="offerQRArea" style="display:none">
+            <p class="hint">Peer B scans this QR — offer loads automatically. Or copy the code below.</p>
             <div id="offerQR" class="qr-box"></div>
-            <input type="text" id="offerShortInput"
-              placeholder="Peer B: type the offer code here"
-              class="short-input" autocomplete="off" spellcheck="false">
+            <textarea id="offerBoxQR" class="qr-code-text"
+              placeholder="QR code text appears here."
+              spellcheck="false" readonly></textarea>
           </div>
         </fieldset>
 
         <!-- Answer -->
         <fieldset>
           <legend>Answer Code <small>— Peer B → Peer A</small></legend>
-
           <div id="answerTextArea">
             <textarea id="answerBox"
-              placeholder="Peer B: answer code appears here. Peer A: paste it here."
+              placeholder="Peer B: answer code appears here. Peer A: paste Peer B's code here."
               spellcheck="false"></textarea>
             <button id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
           </div>
-
-          <div id="answerRelayArea" style="display:none">
-            <p class="hint">Peer B: your short code appears below.<br>
-               Peer A: type the code you received.</p>
-            <div id="answerShortDisplay" class="short-code-display" style="display:none"></div>
+          <div id="answerQRArea" style="display:none">
+            <p class="hint">Peer A scans this QR — answer loads automatically. Or copy the code below.</p>
             <div id="answerQR" class="qr-box"></div>
-            <input type="text" id="answerShortInput"
-              placeholder="Peer A: type the answer code here"
-              class="short-input" autocomplete="off" spellcheck="false">
+            <textarea id="answerBoxQR" class="qr-code-text"
+              placeholder="QR code text appears here."
+              spellcheck="false" readonly></textarea>
           </div>
         </fieldset>
+
+        <!-- Reconnect panel (hidden until needed) -->
+        <div id="reconnectPanel" class="reconnect-panel" style="display:none">
+          <b>⚠ Connection lost</b><br>
+          If both devices are on the same network, click Reconnect to restore without re-exchanging codes.
+          <br><br>
+          <button onclick="manualReconnect()">Reconnect (same network)</button>
+        </div>
 
         <!-- Log -->
         <fieldset>
@@ -125,11 +118,16 @@
       <!-- RIGHT -->
       <div class="col">
 
+        <!-- File transfer -->
         <fieldset>
           <legend>File Transfer</legend>
-          <p class="hint">Connect first, then pick a file and send.</p>
+          <p class="hint">Connect first. Large files (up to 5 GB) supported — Chrome streams to disk without using RAM.</p>
           <input type="file" id="fileInput" disabled>
-          <button id="sendFileBtn" onclick="sendFile()" disabled>Send File</button>
+          <div class="btn-row" style="margin-top:4px">
+            <button id="sendFileBtn" onclick="sendFile()" disabled>Send File</button>
+            <button id="authSaveBtn" onclick="authorizeSave()" title="Pre-authorize a save location for incoming large files">📁 Pre-auth Save</button>
+          </div>
+          <p id="authSaveStatus" class="hint" style="margin-top:4px"></p>
           <div class="progress-wrap">
             <div class="progress-track">
               <div id="progressBar" class="progress-bar" style="width:0%"></div>
@@ -138,9 +136,9 @@
           </div>
         </fieldset>
 
+        <!-- Chat -->
         <fieldset class="chat-fieldset">
           <legend>Text Chat <small>— press Enter to send</small></legend>
-          <p class="hint">Connect first. Messages go directly peer-to-peer, no server.</p>
           <div id="chatBox" class="chat">
             <div class="chat-empty">No messages yet. Connect to start chatting.</div>
           </div>
@@ -150,22 +148,49 @@
           </div>
         </fieldset>
 
+        <!-- Voice / PTT -->
+        <fieldset id="voiceSection">
+          <legend>🎙 Voice — Push to Talk</legend>
+          <p class="hint">Real-time voice over the same P2P connection. Hold PTT to transmit.</p>
+
+          <div id="voiceIdle">
+            <button id="startVoiceBtn" onclick="startVoice()" disabled>Enable Voice</button>
+            <span class="hint" style="display:inline"> (connect first)</span>
+          </div>
+
+          <div id="voiceActive" style="display:none">
+            <div class="ptt-wrap">
+              <button id="pttBtn" class="ptt-btn">🎙 HOLD TO TALK</button>
+              <span id="pttStatus" class="ptt-status">STANDBY</span>
+            </div>
+            <div class="btn-row" style="margin-top:6px">
+              <button onclick="stopVoice()">End Voice</button>
+              <span id="voiceInfo" class="hint" style="margin:0 6px;line-height:24px">Mic active</span>
+            </div>
+          </div>
+
+          <div id="voiceWaiting" style="display:none">
+            <span class="hint">Setting up voice channel with peer…</span>
+          </div>
+        </fieldset>
+
       </div>
     </div>
 
   </div>
 
   <div class="statusbar">
-    <span>PeerDrop 95 v1.1</span>
-    <span>WebRTC — No server required</span>
+    <span>PeerDrop 95 v1.2</span>
+    <span>WebRTC — No server · Files + Chat + Voice</span>
     <span id="sbStatus">Not connected</span>
   </div>
 
 </div>
 
-<!-- LZ-String: real compression (replaces fake btoa) -->
+<!-- Audio element for remote voice (hidden) -->
+<audio id="remoteAudio" autoplay playsinline style="display:none"></audio>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
-<!-- QR Code generator -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="app.js"></script>
 

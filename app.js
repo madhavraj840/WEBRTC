@@ -2,6 +2,8 @@
 
 let pc;
 let channel;
+let isOfferer   = false;  // tracks which peer created the original offer
+let iceRestarting = false; // prevents multiple simultaneous restart attempts
 let receivedChunks = [];
 let receivedBytes  = 0;
 let incomingFileInfo = null;
@@ -18,10 +20,7 @@ const ICE_SERVERS = [
   { urls: "turns:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" }
 ];
 
-// ── Compression using LZ-String ───────────────────────────────────────────────
-// FIX: old compress() used btoa() which is NOT compression — it made codes BIGGER.
-// LZString compresses WebRTC SDP by ~65-70%, reducing ~2000 chars → ~400-600 chars.
-// That is small enough for QR codes and much easier to share.
+// ── Compression ───────────────────────────────────────────────────────────────
 function compress(data) {
   return LZString.compressToEncodedURIComponent(JSON.stringify(data));
 }
@@ -31,61 +30,45 @@ function decompress(str) {
   return JSON.parse(raw);
 }
 
-// ── Relay via jsonblob.com ────────────────────────────────────────────────────
-// jsonblob.com is a free, CORS-enabled, anonymous JSON store.
-// POST a JSON body → get back a unique 19-digit ID in the Location header.
-// GET /{id} → retrieve the stored JSON.
-// The SDP is only valid for one session and contains no personal data.
+// ── Relay (jsonblob.com) ──────────────────────────────────────────────────────
 const RELAY_BASE = "https://jsonblob.com/api/jsonBlob";
 
 async function uploadToRelay(sdpObject) {
-  const compressed = compress(sdpObject);
   const res = await fetch(RELAY_BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Accept": "application/json" },
-    body: JSON.stringify({ d: compressed })
+    body: JSON.stringify({ d: compress(sdpObject) })
   });
   if (!res.ok) throw new Error("Relay upload failed: " + res.status);
-  // Location: https://jsonblob.com/api/jsonBlob/1234567890123456789
   const loc = res.headers.get("Location") || "";
   const id  = loc.split("/").pop();
   if (!id) throw new Error("Relay returned no ID");
-  return id; // ~19 digit string
+  return id;
 }
 
 async function downloadFromRelay(id) {
-  const cleanId = id.trim().replace(/\s+/g, "");
-  const res = await fetch(RELAY_BASE + "/" + cleanId, {
+  const res = await fetch(RELAY_BASE + "/" + id.trim().replace(/\s+/g,""), {
     headers: { "Accept": "application/json" }
   });
-  if (!res.ok) throw new Error("Relay fetch failed: " + res.status + " — check the code");
+  if (!res.ok) throw new Error("Relay fetch failed: " + res.status);
   const obj = await res.json();
   return decompress(obj.d);
 }
 
-// ── QR code generation ────────────────────────────────────────────────────────
-// FIX: QR was removed in earlier cleanup. Re-added.
-// With LZ-string compression, codes are ~400-600 chars — perfect for QR.
-// In relay mode, QR encodes just the 19-digit ID — even smaller.
+// ── QR ────────────────────────────────────────────────────────────────────────
 function showQR(containerId, text) {
   const el = document.getElementById(containerId);
   if (!el) return;
   el.innerHTML = "";
   if (!text) return;
   try {
-    new QRCode(el, {
-      text:          text,
-      width:         160,
-      height:        160,
-      correctLevel:  QRCode.CorrectLevel.M
-    });
+    new QRCode(el, { text, width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M });
   } catch (e) {
     el.textContent = "QR too large — use copy/paste mode.";
-    log("QR generation failed: " + e.message, "warn");
   }
 }
 
-// ── Mode helpers ──────────────────────────────────────────────────────────────
+// ── Mode ──────────────────────────────────────────────────────────────────────
 function getMode() {
   const el = document.querySelector('input[name="mode"]:checked');
   return el ? el.value : "text";
@@ -93,14 +76,13 @@ function getMode() {
 
 function onModeChange() {
   const relay = getMode() === "relay";
-  document.getElementById("offerTextArea").style.display  = relay ? "none" : "block";
-  document.getElementById("offerRelayArea").style.display = relay ? "block" : "none";
-  document.getElementById("answerTextArea").style.display  = relay ? "none" : "block";
+  document.getElementById("offerTextArea").style.display   = relay ? "none"  : "block";
+  document.getElementById("offerRelayArea").style.display  = relay ? "block" : "none";
+  document.getElementById("answerTextArea").style.display  = relay ? "none"  : "block";
   document.getElementById("answerRelayArea").style.display = relay ? "block" : "none";
   document.getElementById("modeHint").textContent = relay
-    ? "Uses jsonblob.com as a free relay — gives a short code + QR. Codes expire after ~30 days."
-    : "Copy/paste the code — works offline, no relay needed.";
-  // Clear QR and short code displays when switching
+    ? "Uses jsonblob.com — gives a short code + QR. Codes expire after ~30 days."
+    : "Copy/paste the code — works offline on same network, no relay needed.";
   ["offerQR","answerQR"].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ""; });
   ["offerShortDisplay","answerShortDisplay"].forEach(id => {
     const e = document.getElementById(id);
@@ -108,7 +90,7 @@ function onModeChange() {
   });
 }
 
-// ── Logging + status ──────────────────────────────────────────────────────────
+// ── Logging / status ──────────────────────────────────────────────────────────
 function log(msg, type) {
   const box = document.getElementById("logBox");
   if (!box) return;
@@ -120,25 +102,25 @@ function log(msg, type) {
 }
 
 function setStatus(text, type) {
-  const dot  = document.getElementById("statusDot");
-  const span = document.getElementById("statusText");
-  const sb   = document.getElementById("sbStatus");
-  if (dot)  dot.className    = "dot dot-" + (type || "idle");
-  if (span) span.textContent  = text;
-  if (sb)   sb.textContent    = text;
+  ["statusDot"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.className = "dot dot-" + (type || "idle");
+  });
+  ["statusText","sbStatus"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = text;
+  });
 }
 
 function setTransferControls(on) {
   ["chatInput","sendMsgBtn","sendFileBtn","fileInput"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.disabled = !on;
+    const el = document.getElementById(id); if (el) el.disabled = !on;
   });
 }
 
 function setConnectionBtns(on) {
   ["btnCreateOffer","btnGenAnswer","btnConnect"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.disabled = !on;
+    const el = document.getElementById(id); if (el) el.disabled = !on;
   });
 }
 
@@ -149,31 +131,182 @@ function fmtBytes(b) {
 }
 
 function flash(id, text) {
-  const btn = document.getElementById(id);
-  if (!btn) return;
+  const btn = document.getElementById(id); if (!btn) return;
   const orig = btn.textContent;
   btn.textContent = text;
   setTimeout(() => btn.textContent = orig, 1500);
 }
 
+function formatCode(id) {
+  return id.replace(/(\d{4})(?=\d)/g, "$1 ").trim();
+}
+
+// ── Reconnect UI ──────────────────────────────────────────────────────────────
+function showReconnectPanel(show) {
+  const panel = document.getElementById("reconnectPanel");
+  if (panel) panel.style.display = show ? "block" : "none";
+}
+
+// Called when auto-restart fails and needs manual re-exchange.
+// Peer A generates a new local-only offer (fast — no TURN needed on LAN)
+// and shows it as a short code for Peer B to paste.
+async function manualReconnect() {
+  const btn = document.getElementById("btnManualReconnect");
+  if (btn) btn.disabled = true;
+  showReconnectPanel(false);
+  log("Generating reconnect offer (local network only)…", "warn");
+  setStatus("Reconnecting…", "connecting");
+
+  try {
+    // Create fresh peer — keeps all ICE servers so it works on any network
+    createPeer();
+    channel = pc.createDataChannel("file");
+    setupChannel();
+    isOfferer = true;
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await waitIce();
+
+    const code = compress(pc.localDescription);
+
+    // Put the reconnect code in the offer box and switch UI to text mode
+    document.querySelector('input[name="mode"][value="text"]').checked = true;
+    onModeChange();
+    document.getElementById("offerBox").value = code;
+
+    log("Reconnect offer ready — share it with Peer B again.", "ok");
+    setStatus("Share reconnect offer with Peer B", "connecting");
+    if (btn) btn.disabled = false;
+  } catch (err) {
+    log("Reconnect error: " + err.message, "err");
+    setStatus("Reconnect failed", "error");
+    if (btn) btn.disabled = false;
+    showReconnectPanel(true);
+  }
+}
+
+// ── ICE restart (automatic, through data channel) ─────────────────────────────
+//
+// HOW IT WORKS:
+// When the connection drops, if the data channel is still alive
+// (state = "disconnected" but not yet "failed"), Peer A sends a new
+// ICE offer THROUGH the channel itself using the ICE_OFFER: prefix.
+// Peer B receives it, creates an answer, sends ICE_ANSWER: back.
+// Both peers apply the new descriptions → WebRTC finds the local
+// LAN path and reconnects without any internet or user action.
+//
+// If the channel is dead ("failed"), we fall back to the manual reconnect UI.
+
+let reconnectTimer = null;
+
+function scheduleReconnect() {
+  if (iceRestarting) return;
+  iceRestarting = true;
+
+  // Wait 3s — WebRTC sometimes heals itself (e.g. brief network blip)
+  log("Connection lost — waiting 3s before attempting restart…", "warn");
+  reconnectTimer = setTimeout(async () => {
+    if (!pc || pc.connectionState === "connected") {
+      iceRestarting = false;
+      return;
+    }
+    await attemptIceRestart();
+  }, 3000);
+}
+
+async function attemptIceRestart() {
+  log("Attempting ICE restart…", "warn");
+  setStatus("Reconnecting…", "connecting");
+
+  // Only the original offerer (Peer A) drives the ICE restart
+  if (!isOfferer) {
+    log("Waiting for Peer A to restart ICE…");
+    // Answerer just waits — Peer A will send ICE_OFFER through channel if possible
+    // If channel is dead, both sides will time out and show the reconnect panel
+    setTimeout(() => {
+      if (!pc || pc.connectionState !== "connected") {
+        log("No restart received from Peer A. Use Reconnect button.", "warn");
+        showReconnectPanel(true);
+        iceRestarting = false;
+      }
+    }, 10000);
+    return;
+  }
+
+  try {
+    // Try sending restart offer through the data channel
+    if (channel && channel.readyState === "open") {
+      log("Sending ICE restart offer via data channel…");
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+      await waitIce();
+      channel.send("ICE_OFFER:" + compress(pc.localDescription));
+      log("ICE restart offer sent — waiting for Peer B's answer…");
+
+      // If no answer within 8s, the channel probably died — show manual UI
+      setTimeout(() => {
+        if (pc && pc.connectionState !== "connected") {
+          log("No answer from Peer B. Use Reconnect button.", "warn");
+          showReconnectPanel(true);
+          iceRestarting = false;
+        }
+      }, 8000);
+
+    } else {
+      // Channel is dead — can't auto-restart, need manual re-exchange
+      log("Channel closed. Use Reconnect button to reconnect over local network.", "warn");
+      showReconnectPanel(true);
+      iceRestarting = false;
+    }
+  } catch (err) {
+    log("ICE restart error: " + err.message, "err");
+    showReconnectPanel(true);
+    iceRestarting = false;
+  }
+}
+
 // ── Peer connection ───────────────────────────────────────────────────────────
 function createPeer() {
   if (pc) { pc.close(); pc = null; }
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  iceRestarting = false;
+  showReconnectPanel(false);
+
   pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceTransportPolicy: "all" });
 
   pc.onconnectionstatechange = () => {
     const s = pc.connectionState;
     const labels = {
-      connected:"Connected", connecting:"Connecting…", disconnected:"Disconnected",
-      failed:"Connection failed", closed:"Closed", new:"Initialising…"
+      connected:"Connected", connecting:"Connecting…", disconnected:"Reconnecting…",
+      failed:"Connection lost", closed:"Closed", new:"Initialising…"
     };
     const types = {
       connected:"connected", connecting:"connecting", new:"connecting",
-      disconnected:"error", failed:"error", closed:"idle"
+      disconnected:"connecting", failed:"error", closed:"idle"
     };
+
     log("Connection: " + s, s === "connected" ? "ok" : s === "failed" ? "err" : "info");
     setStatus(labels[s] || s, types[s] || "idle");
-    setTransferControls(s === "connected");
+
+    if (s === "connected") {
+      // Successfully (re)connected
+      setTransferControls(true);
+      setConnectionBtns(true);
+      showReconnectPanel(false);
+      iceRestarting = false;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+
+    } else if (s === "disconnected" || s === "failed") {
+      // Lost connection — disable transfer controls and try to reconnect
+      setTransferControls(false);
+      if (s === "disconnected") {
+        scheduleReconnect();
+      } else {
+        // "failed" is more severe — try immediately
+        if (!iceRestarting) attemptIceRestart();
+      }
+    }
   };
 
   pc.onicecandidate = (e) => {
@@ -197,37 +330,75 @@ function setupChannel() {
     setStatus("Connected", "connected");
     setTransferControls(true);
     setConnectionBtns(true);
-  };
-  channel.onclose = () => {
-    log("Channel closed.", "warn");
-    setStatus("Disconnected", "idle");
-    setTransferControls(false);
-    setConnectionBtns(true);
-  };
-  channel.onerror = (e) => {
-    log("Channel error: " + (e.message || "unknown"), "err");
-    setStatus("Error", "error");
-    setConnectionBtns(true);
+    showReconnectPanel(false);
+    iceRestarting = false;
   };
 
-  channel.onmessage = (e) => {
-    if (typeof e.data === "string") {
-      if (e.data.startsWith("MSG:"))  { addChat("peer", e.data.slice(4)); return; }
-      if (e.data.startsWith("META:")) {
-        incomingFileInfo = JSON.parse(e.data.slice(5));
-        receivedChunks = []; receivedBytes = 0;
-        log("Incoming: " + incomingFileInfo.name + " (" + fmtBytes(incomingFileInfo.size) + ")");
-        updateProgress(0, "Receiving…");
-        return;
+  channel.onclose = () => {
+    log("Channel closed.", "warn");
+  };
+
+  channel.onerror = (e) => {
+    log("Channel error: " + (e.message || "unknown"), "err");
+  };
+
+  channel.onmessage = async (e) => {
+    if (typeof e.data !== "string") {
+      // Binary file chunk
+      if (e.data instanceof ArrayBuffer) {
+        receivedChunks.push(e.data);
+        receivedBytes += e.data.byteLength;
+        if (incomingFileInfo)
+          updateProgress(Math.min(100, (receivedBytes / incomingFileInfo.size) * 100), "Receiving…");
       }
-      if (e.data === "EOF") { finalizeDownload(); return; }
+      return;
     }
-    if (e.data instanceof ArrayBuffer) {
-      receivedChunks.push(e.data);
-      receivedBytes += e.data.byteLength;
-      if (incomingFileInfo)
-        updateProgress(Math.min(100, (receivedBytes / incomingFileInfo.size) * 100), "Receiving…");
+
+    // ── ICE restart: Peer B receives new offer from Peer A ────────────────
+    if (e.data.startsWith("ICE_OFFER:")) {
+      try {
+        log("ICE restart offer received — generating answer…", "warn");
+        const offerSdp = decompress(e.data.slice(10));
+        await pc.setRemoteDescription(offerSdp);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await waitIce();
+        channel.send("ICE_ANSWER:" + compress(pc.localDescription));
+        log("ICE restart answer sent.", "ok");
+      } catch (err) {
+        log("ICE restart (answerer) error: " + err.message, "err");
+      }
+      return;
     }
+
+    // ── ICE restart: Peer A receives answer from Peer B ───────────────────
+    if (e.data.startsWith("ICE_ANSWER:")) {
+      try {
+        log("ICE restart answer received — applying…", "warn");
+        const answerSdp = decompress(e.data.slice(11));
+        await pc.setRemoteDescription(answerSdp);
+        log("ICE restart complete — reconnecting…", "ok");
+        iceRestarting = false;
+      } catch (err) {
+        log("ICE restart (offerer) error: " + err.message, "err");
+        showReconnectPanel(true);
+        iceRestarting = false;
+      }
+      return;
+    }
+
+    // ── Normal messages ───────────────────────────────────────────────────
+    if (e.data.startsWith("MSG:"))  { addChat("peer", e.data.slice(4)); return; }
+
+    if (e.data.startsWith("META:")) {
+      incomingFileInfo = JSON.parse(e.data.slice(5));
+      receivedChunks = []; receivedBytes = 0;
+      log("Incoming: " + incomingFileInfo.name + " (" + fmtBytes(incomingFileInfo.size) + ")");
+      updateProgress(0, "Receiving…");
+      return;
+    }
+
+    if (e.data === "EOF") { finalizeDownload(); return; }
   };
 }
 
@@ -245,7 +416,7 @@ function waitIce() {
       resolve();
     }
     function onState() { if (pc.iceGatheringState === "complete") finish("complete"); }
-    function onCand(e)  { if (e.candidate && e.candidate.type === "relay") finish("relay found"); }
+    function onCand(e) { if (e.candidate && e.candidate.type === "relay") finish("relay found"); }
     const t = setTimeout(() => finish("2s timeout"), 2000);
     pc.addEventListener("icegatheringstatechange", onState);
     pc.addEventListener("icecandidate", onCand);
@@ -258,6 +429,7 @@ async function createOffer() {
     setConnectionBtns(false);
     setStatus("Gathering candidates…", "connecting");
     log("Creating offer…");
+    isOfferer = true;          // this peer drives ICE restarts
     createPeer();
     channel = pc.createDataChannel("file");
     setupChannel();
@@ -270,17 +442,14 @@ async function createOffer() {
       log("Uploading offer to relay…");
       const id = await uploadToRelay(sdp);
       log("Offer uploaded. Code: " + id, "ok");
-      // Show short code
       const disp = document.getElementById("offerShortDisplay");
-      disp.textContent = formatCode(id);
-      disp.style.display = "block";
-      // Show QR of just the short ID — very small QR
+      disp.textContent = formatCode(id); disp.style.display = "block";
       showQR("offerQR", id);
       setStatus("Share offer code with Peer B", "connecting");
     } else {
       const code = compress(sdp);
       document.getElementById("offerBox").value = code;
-      log("Offer ready (" + code.length + " chars — " + Math.round(code.length/20) + "x smaller than before).", "ok");
+      log("Offer ready (" + code.length + " chars).", "ok");
       setStatus("Send offer code to Peer B", "connecting");
     }
     setConnectionBtns(true);
@@ -297,14 +466,14 @@ async function acceptOffer() {
     setConnectionBtns(false);
     setStatus("Processing offer…", "connecting");
     log("Generating answer…");
+    isOfferer = false;         // this peer waits for ICE restart offers
 
     let sdp;
     if (getMode() === "relay") {
       const id = document.getElementById("offerShortInput").value.trim().replace(/\s+/g,"");
-      if (!id) { log("Enter the offer code Peer A shared with you.", "warn"); setConnectionBtns(true); return; }
+      if (!id) { log("Enter the offer code.", "warn"); setConnectionBtns(true); return; }
       log("Fetching offer from relay…");
       sdp = await downloadFromRelay(id);
-      log("Offer fetched.", "ok");
     } else {
       const raw = document.getElementById("offerBox").value.trim();
       if (!raw) { log("Paste the offer code first.", "warn"); setConnectionBtns(true); return; }
@@ -323,14 +492,13 @@ async function acceptOffer() {
       const id = await uploadToRelay(answerSdp);
       log("Answer uploaded. Code: " + id, "ok");
       const disp = document.getElementById("answerShortDisplay");
-      disp.textContent = formatCode(id);
-      disp.style.display = "block";
+      disp.textContent = formatCode(id); disp.style.display = "block";
       showQR("answerQR", id);
       setStatus("Share answer code with Peer A", "connecting");
     } else {
       const code = compress(answerSdp);
       document.getElementById("answerBox").value = code;
-      log("Answer ready — send back to Peer A.", "ok");
+      log("Answer ready — send to Peer A.", "ok");
       setStatus("Send answer code to Peer A", "connecting");
     }
     setConnectionBtns(true);
@@ -341,7 +509,7 @@ async function acceptOffer() {
   }
 }
 
-// ── Accept answer (Peer A connects) ──────────────────────────────────────────
+// ── Accept answer ─────────────────────────────────────────────────────────────
 async function acceptAnswer() {
   try {
     setConnectionBtns(false);
@@ -350,10 +518,9 @@ async function acceptAnswer() {
     let sdp;
     if (getMode() === "relay") {
       const id = document.getElementById("answerShortInput").value.trim().replace(/\s+/g,"");
-      if (!id) { log("Enter the answer code Peer B shared with you.", "warn"); setConnectionBtns(true); return; }
+      if (!id) { log("Enter the answer code.", "warn"); setConnectionBtns(true); return; }
       log("Fetching answer from relay…");
       sdp = await downloadFromRelay(id);
-      log("Answer fetched.", "ok");
     } else {
       const raw = document.getElementById("answerBox").value.trim();
       if (!raw) { log("Paste the answer code first.", "warn"); setConnectionBtns(true); return; }
@@ -361,19 +528,13 @@ async function acceptAnswer() {
     }
 
     await pc.setRemoteDescription(sdp);
-    log("Answer accepted — establishing connection…", "ok");
+    log("Answer accepted — connecting…", "ok");
     setStatus("Connecting…", "connecting");
-    // Buttons re-enabled by channel events
   } catch (err) {
     log("Error: " + err.message, "err");
     setStatus("Error", "error");
     setConnectionBtns(true);
   }
-}
-
-// ── Format a long numeric ID for readability: groups of 4 ────────────────────
-function formatCode(id) {
-  return id.replace(/(\d{4})(?=\d)/g, "$1 ").trim();
 }
 
 // ── File send ─────────────────────────────────────────────────────────────────
@@ -413,7 +574,7 @@ function finalizeDownload() {
 
 // ── Progress ──────────────────────────────────────────────────────────────────
 function updateProgress(pct, label) {
-  const p   = Math.min(100, Math.round(pct));
+  const p = Math.min(100, Math.round(pct));
   const bar = document.getElementById("progressBar");
   const lbl = document.getElementById("progressLabel");
   if (bar) bar.style.width = p + "%";
@@ -460,7 +621,7 @@ document.getElementById("chatInput").addEventListener("keydown", function(e) {
   if (e.key === "Enter") sendMessage();
 });
 
-// ── Init (runs immediately — script is at bottom of body so DOM is ready) ─────
+// ── Init ──────────────────────────────────────────────────────────────────────
 setTransferControls(false);
 setStatus("Not connected", "idle");
 log("PeerDrop 95 ready. Select a mode and click Create Offer to begin.");
