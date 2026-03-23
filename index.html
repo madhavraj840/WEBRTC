@@ -27,58 +27,94 @@
       <div class="steps">
         <div class="step">
           <span class="step-num">1</span>
-          <div><b>Peer A:</b> Click <b>Create Offer</b>. Copy the code from the Offer box and send it to Peer B (email, chat, etc.).</div>
+          <div><b>Peer A:</b> Select a share mode below, then click <b>Create Offer</b>.</div>
         </div>
         <div class="step">
           <span class="step-num">2</span>
-          <div><b>Peer B:</b> Paste the code into the Offer box. Click <b>Generate Answer</b>. Copy the answer and send it back to Peer A.</div>
+          <div><b>Peer B:</b> Enter the offer code or scan QR. Click <b>Generate Answer</b> and share the answer back.</div>
         </div>
         <div class="step">
           <span class="step-num">3</span>
-          <div><b>Peer A:</b> Paste the answer into the Answer box. Click <b>Connect</b>. Status will change to <b class="ok">Connected</b>.</div>
+          <div><b>Peer A:</b> Enter the answer code. Click <b>Connect</b>. Status changes to <b class="ok">Connected</b>.</div>
         </div>
       </div>
       <p class="warning">⚠ Both peers must have this page open at the same time. For cross-network use, a TURN relay server may be required.</p>
     </fieldset>
 
     <div class="cols">
-
       <!-- LEFT -->
       <div class="col">
 
+        <!-- Connection + mode -->
         <fieldset>
           <legend>Connection</legend>
           <div class="status-row">
             <span id="statusDot" class="dot dot-idle"></span>
             <span id="statusText">Not connected</span>
           </div>
+
+          <!-- Share mode selector -->
+          <div class="mode-row">
+            <label class="mode-label">Share mode:</label>
+            <label class="radio-lbl"><input type="radio" name="mode" value="text" checked onchange="onModeChange()"> Text (copy/paste)</label>
+            <label class="radio-lbl"><input type="radio" name="mode" value="relay" onchange="onModeChange()"> Short Code + QR</label>
+          </div>
+          <p id="modeHint" class="hint mode-hint">Copy/paste the code — works offline, no relay needed.</p>
+
           <div class="btn-row">
-            <!-- BUG FIX 4: IDs added so buttons can be disabled during async ops -->
             <button id="btnCreateOffer" onclick="createOffer()">Create Offer</button>
             <button id="btnGenAnswer"   onclick="acceptOffer()">Generate Answer</button>
             <button id="btnConnect"     onclick="acceptAnswer()">Connect</button>
           </div>
         </fieldset>
 
+        <!-- Offer -->
         <fieldset>
-          <legend>Offer Code <small>— Peer A copies this and sends to Peer B</small></legend>
-          <!--
-            BUG FIX 1: NO readonly attribute here.
-            This textarea is used by BOTH peers:
-            - Peer A: JS fills it with the generated offer code (can still copy it out)
-            - Peer B: must be able to paste Peer A's code in here
-            Any previous version that had readonly="readonly" would block Peer B from pasting.
-          -->
-          <textarea id="offerBox" placeholder="Peer A: offer code appears here after Create Offer. Peer B: paste Peer A's code here." spellcheck="false"></textarea>
-          <button id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
+          <legend>Offer Code <small>— Peer A → Peer B</small></legend>
+
+          <!-- TEXT MODE: full code textarea -->
+          <div id="offerTextArea">
+            <textarea id="offerBox"
+              placeholder="Peer A: offer code appears here. Peer B: paste it here."
+              spellcheck="false"></textarea>
+            <button id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
+          </div>
+
+          <!-- RELAY MODE: short code display + input + QR -->
+          <div id="offerRelayArea" style="display:none">
+            <p class="hint">Peer A: your short code appears below — share it or show the QR.<br>
+               Peer B: type the code you received into the box below.</p>
+            <div id="offerShortDisplay" class="short-code-display" style="display:none"></div>
+            <div id="offerQR" class="qr-box"></div>
+            <input type="text" id="offerShortInput"
+              placeholder="Peer B: type the offer code here"
+              class="short-input" autocomplete="off" spellcheck="false">
+          </div>
         </fieldset>
 
+        <!-- Answer -->
         <fieldset>
-          <legend>Answer Code <small>— Peer B copies this and sends to Peer A</small></legend>
-          <textarea id="answerBox" placeholder="Peer B: answer code appears here after Generate Answer. Peer A: paste Peer B's code here." spellcheck="false"></textarea>
-          <button id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
+          <legend>Answer Code <small>— Peer B → Peer A</small></legend>
+
+          <div id="answerTextArea">
+            <textarea id="answerBox"
+              placeholder="Peer B: answer code appears here. Peer A: paste it here."
+              spellcheck="false"></textarea>
+            <button id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
+          </div>
+
+          <div id="answerRelayArea" style="display:none">
+            <p class="hint">Peer B: your short code appears below.<br>
+               Peer A: type the code you received.</p>
+            <div id="answerShortDisplay" class="short-code-display" style="display:none"></div>
+            <div id="answerQR" class="qr-box"></div>
+            <input type="text" id="answerShortInput"
+              placeholder="Peer A: type the answer code here"
+              class="short-input" autocomplete="off" spellcheck="false">
+          </div>
         </fieldset>
 
+        <!-- Log -->
         <fieldset>
           <legend>Event Log</legend>
           <div id="logBox" class="log"></div>
@@ -120,14 +156,17 @@
   </div>
 
   <div class="statusbar">
-    <span>PeerDrop 95 v1.0</span>
+    <span>PeerDrop 95 v1.1</span>
     <span>WebRTC — No server required</span>
     <span id="sbStatus">Not connected</span>
   </div>
 
 </div>
 
-<!-- Script at bottom of body: DOM is ready, no DOMContentLoaded needed -->
+<!-- LZ-String: real compression (replaces fake btoa) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
+<!-- QR Code generator -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="app.js"></script>
 
 </body>
