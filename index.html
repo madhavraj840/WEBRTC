@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WebRTC File Transfer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<h2>File Transfer Utility</h2>
+
+<div class="window">
+  <div class="title">Instructions</div>
+  <div class="content">
+    1. User A → Create Offer<br>
+    2. Share code or QR<br>
+    3. User B → Paste → Generate Answer<br>
+    4. Send answer back<br>
+    5. User A → Connect<br>
+    6. Send file
+  </div>
+</div>
+
+<div class="window">
+  <div class="title">Connection</div>
+  <div class="content">
+    <button onclick="createOffer()">Create Offer</button>
+    <button onclick="acceptOffer()">Generate Answer</button>
+    <button onclick="acceptAnswer()">Connect</button>
+
+    <p>Status: <span id="status">Idle</span></p>
+  </div>
+</div>
+
+<div class="window">
+  <div class="title">Code</div>
+  <div class="content">
+
+    <select id="mode">
+      <option value="base64">Base64</option>
+      <option value="qr">QR</option>
+    </select>
+
+    <textarea id="offerBox"></textarea>
+    <textarea id="answerBox"></textarea>
+
+    <button onclick="copyOffer()">Copy Offer</button>
+    <button onclick="copyAnswer()">Copy Answer</button>
+
+    <div id="qr"></div>
+  </div>
+</div>
+
+<div class="window">
+  <div class="title">File Transfer</div>
+  <div class="content">
+    <input type="file" id="fileInput">
+    <button onclick="sendFile()">Send File</button>
+    <p>Progress: <span id="progress">0%</span></p>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
