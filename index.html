@@ -23,18 +23,18 @@
       <div class="steps">
         <div class="step">
           <span class="step-num">1</span>
-          <div><b>Peer A:</b> Choose share mode, click <b>Create Offer</b>. Copy the code or show the QR to Peer B.</div>
+          <div><b>Peer A:</b> Click <b>Create Offer</b> and share the offer code with Peer B.</div>
         </div>
         <div class="step">
           <span class="step-num">2</span>
-          <div><b>Peer B:</b> Scan QR or paste the code into the Offer box. Click <b>Generate Answer</b>. Share the answer back to Peer A.</div>
+          <div><b>Peer B:</b> Paste the offer code into the Offer box and click <b>Generate Answer</b>. Share the answer code back to Peer A.</div>
         </div>
         <div class="step">
           <span class="step-num">3</span>
           <div><b>Peer A:</b> Paste the answer. Click <b>Connect</b>. Status changes to <b class="ok">Connected</b>. Files, chat and voice are all ready.</div>
         </div>
       </div>
-      <p class="warning">⚠ Both peers must keep this tab open. For cross-network use, TURN relay is used automatically. For large files (&gt;500 MB) use Chrome — it streams directly to disk without loading into RAM.</p>
+      <p class="warning">⚠ Both peers must keep this tab open. For cross-network use, TURN is used automatically. For large files (&gt;500 MB) use Chrome — it streams directly to disk without loading into RAM.</p>
     </fieldset>
 
     <div class="cols">
@@ -50,12 +50,7 @@
           </div>
           <div id="roleLock" class="role-pill role-none">Role: Unlocked</div>
 
-          <div class="mode-row">
-            <label class="mode-label">Share mode:</label>
-            <label class="radio-lbl"><input type="radio" name="mode" value="text" checked onchange="onModeChange()"> Text (copy/paste)</label>
-            <label class="radio-lbl"><input type="radio" name="mode" value="qr"   onchange="onModeChange()"> QR Code</label>
-          </div>
-          <p id="modeHint" class="hint mode-hint">Copy/paste the code to the other device.</p>
+          <p class="hint mode-hint">Share signaling codes using copy/paste.</p>
 
           <div class="btn-row">
             <button id="btnCreateOffer" onclick="createOffer()">Create Offer</button>
@@ -68,37 +63,19 @@
         <!-- Offer -->
         <fieldset>
           <legend>Offer Code <small>— Peer A → Peer B</small></legend>
-          <div id="offerTextArea">
-            <textarea id="offerBox"
-              placeholder="Peer A: offer code appears here. Peer B: paste Peer A's code here."
-              spellcheck="false"></textarea>
-            <button id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
-          </div>
-          <div id="offerQRArea" style="display:none">
-            <p class="hint">Peer B scans this QR. If scanning is unavailable, paste/share the relay ID below.</p>
-            <div id="offerQR" class="qr-box"></div>
-            <textarea id="offerBoxQR" class="qr-code-text"
-              placeholder="QR code text appears here."
-              spellcheck="false"></textarea>
-          </div>
+          <textarea id="offerBox"
+            placeholder="Peer A: offer code appears here. Peer B: paste Peer A's code here."
+            spellcheck="false"></textarea>
+          <button id="copyOfferBtn" onclick="copyOffer()">Copy Offer</button>
         </fieldset>
 
         <!-- Answer -->
         <fieldset>
           <legend>Answer Code <small>— Peer B → Peer A</small></legend>
-          <div id="answerTextArea">
-            <textarea id="answerBox"
-              placeholder="Peer B: answer code appears here. Peer A: paste Peer B's code here."
-              spellcheck="false"></textarea>
-            <button id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
-          </div>
-          <div id="answerQRArea" style="display:none">
-            <p class="hint">Peer A scans this QR. If scanning is unavailable, paste/share the relay ID below.</p>
-            <div id="answerQR" class="qr-box"></div>
-            <textarea id="answerBoxQR" class="qr-code-text"
-              placeholder="QR code text appears here."
-              spellcheck="false"></textarea>
-          </div>
+          <textarea id="answerBox"
+            placeholder="Peer B: answer code appears here. Peer A: paste Peer B's code here."
+            spellcheck="false"></textarea>
+          <button id="copyAnswerBtn" onclick="copyAnswer()">Copy Answer</button>
         </fieldset>
 
         <!-- Reconnect panel (hidden until needed) -->
@@ -106,7 +83,7 @@
           <b>⚠ Connection lost</b><br>
           If both devices are on the same network, click Reconnect to restore without re-exchanging codes.
           <br><br>
-          <button onclick="manualReconnect()">Reconnect (same network)</button>
+          <button id="btnManualReconnect" onclick="manualReconnect()">Reconnect (same network)</button>
         </div>
 
         <!-- Log -->
@@ -193,7 +170,6 @@
 <audio id="remoteAudio" autoplay playsinline style="display:none"></audio>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.4.4/lz-string.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="app.js"></script>
 
 </body>

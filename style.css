@@ -392,72 +392,7 @@ input[type="file"]:disabled {
   body   { padding: 4px; }
 }
 
-/* ── Mode selector ── */
-.mode-row {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  margin-bottom: 6px;
-  padding: 5px 6px;
-  background: #d4d0c8;
-  border-top:   1px solid var(--dk);
-  border-left:  1px solid var(--dk);
-  border-right: 1px solid var(--lt);
-  border-bottom:1px solid var(--lt);
-}
-.mode-label { font-weight: bold; }
-.radio-lbl {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
 .mode-hint { color: #555; margin-bottom: 8px; }
-
-/* ── Short code display ── */
-.short-code-display {
-  font-family: "Courier New", monospace;
-  font-size: 22px;
-  font-weight: bold;
-  letter-spacing: 2px;
-  text-align: center;
-  padding: 10px 6px;
-  background: #fff;
-  border-top:   2px solid var(--dkk);
-  border-left:  2px solid var(--dkk);
-  border-right: 2px solid var(--lt);
-  border-bottom:2px solid var(--lt);
-  margin-bottom: 8px;
-  color: var(--blue);
-}
-
-/* ── Short code input ── */
-.short-input {
-  width: 100%;
-  background: #fff;
-  border-top:   2px solid var(--dkk);
-  border-left:  2px solid var(--dkk);
-  border-right: 2px solid var(--lt);
-  border-bottom:2px solid var(--lt);
-  padding: 4px 6px;
-  font-family: "Courier New", monospace;
-  font-size: 14px;
-  letter-spacing: 1px;
-  margin-top: 8px;
-}
-
-/* ── QR code container ── */
-.qr-box {
-  display: flex;
-  justify-content: center;
-  padding: 8px 0 4px;
-  min-height: 0;
-}
-.qr-box img, .qr-box canvas {
-  border: 3px solid var(--dk);
-  image-rendering: pixelated;
-}
 
 /* ── Reconnect panel ── */
 .reconnect-panel {

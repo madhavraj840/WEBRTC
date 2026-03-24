@@ -21,6 +21,7 @@ let peerRole = "none";
 const CHUNK_SIZE = 16 * 1024;
 const MAX_BUFFERED_AMOUNT = 1024 * 1024;
 const BUFFERED_LOW_WATERMARK = 256 * 1024;
+const ICE_WAIT_TIMEOUT_MS = 12000;
 
 // ── ICE servers ───────────────────────────────────────────────────────────────
 const ICE_SERVERS = [
@@ -42,72 +43,6 @@ function decompress(str) {
   return JSON.parse(raw);
 }
 
-// ── Relay (jsonblob.com) ──────────────────────────────────────────────────────
-const RELAY_BASE = "https://jsonblob.com/api/jsonBlob";
-
-async function uploadToRelay(sdpObject) {
-  const res = await fetch(RELAY_BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Accept": "application/json" },
-    body: JSON.stringify({ d: compress(sdpObject) })
-  });
-  if (!res.ok) throw new Error("Relay upload failed: " + res.status);
-  const loc = res.headers.get("Location") || res.headers.get("location") || "";
-  let id = loc.split("/").pop();
-
-  // Some relays may return the created ID in body rather than Location header.
-  if (!id) {
-    try {
-      const body = await res.clone().json();
-      id = String(body?.id || body?._id || body?.slug || "").trim();
-    } catch (e) {
-      // Ignore parse errors and fail below with a clear message.
-    }
-  }
-
-  if (!id) throw new Error("Relay returned no ID");
-  return id;
-}
-
-async function downloadFromRelay(id) {
-  const res = await fetch(RELAY_BASE + "/" + id.trim().replace(/\s+/g,""), {
-    headers: { "Accept": "application/json" }
-  });
-  if (!res.ok) throw new Error("Relay fetch failed: " + res.status);
-  const obj = await res.json();
-  return decompress(obj.d);
-}
-
-// ── QR ────────────────────────────────────────────────────────────────────────
-function showQR(containerId, text) {
-  const el = document.getElementById(containerId);
-  if (!el) return;
-  el.innerHTML = "";
-  if (!text) return;
-  try {
-    new QRCode(el, { text, width: 160, height: 160, correctLevel: QRCode.CorrectLevel.M });
-  } catch (e) {
-    el.textContent = "QR too large — use copy/paste mode.";
-  }
-}
-
-// ── Mode ──────────────────────────────────────────────────────────────────────
-function getMode() {
-  const el = document.querySelector('input[name="mode"]:checked');
-  return el ? el.value : "text";
-}
-
-function onModeChange() {
-  const qrMode = getMode() === "qr";
-  document.getElementById("offerTextArea").style.display  = qrMode ? "none"  : "block";
-  document.getElementById("offerQRArea").style.display    = qrMode ? "block" : "none";
-  document.getElementById("answerTextArea").style.display = qrMode ? "none"  : "block";
-  document.getElementById("answerQRArea").style.display   = qrMode ? "block" : "none";
-  document.getElementById("modeHint").textContent = qrMode
-    ? "Uses jsonblob.com — gives a short code + QR. Codes expire after ~30 days."
-    : "Copy/paste the code — works offline on same network, no relay needed.";
-  ["offerQR","answerQR"].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ""; });
-}
 
 // ── Logging / status ──────────────────────────────────────────────────────────
 function log(msg, type) {
@@ -171,17 +106,6 @@ function flash(id, text) {
   const orig = btn.textContent;
   btn.textContent = text;
   setTimeout(() => btn.textContent = orig, 1500);
-}
-
-function formatCode(id) {
-  return id.replace(/(\d{4})(?=\d)/g, "$1 ").trim();
-}
-
-function getRelayInputValue(primaryId, fallbackId) {
-  const primary = document.getElementById(primaryId);
-  const fallback = document.getElementById(fallbackId);
-  const value = (primary && primary.value) || (fallback && fallback.value) || "";
-  return value.trim().replace(/\s+/g, "");
 }
 
 function unlockRemoteAudio() {
@@ -372,7 +296,7 @@ function resetSession() {
   const audio = document.getElementById("remoteAudio");
   if (audio) audio.srcObject = null;
 
-  ["offerBox", "offerBoxQR", "answerBox", "answerBoxQR", "chatInput"].forEach((id) => {
+  ["offerBox", "answerBox", "chatInput"].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = "";
   });
@@ -386,7 +310,6 @@ function resetSession() {
   setStatus("Not connected", "idle");
   setRole("none");
   showReconnectPanel(false);
-  onModeChange();
   log("Session reset. Choose roles again (A: Create Offer, B: Generate Answer).", "warn");
 }
 
@@ -420,9 +343,7 @@ async function manualReconnect() {
 
     const code = compress(pc.localDescription);
 
-    // Put the reconnect code in the offer box and switch UI to text mode
-    document.querySelector('input[name="mode"][value="text"]').checked = true;
-    onModeChange();
+    // Put the reconnect code in the offer box for copy/paste sharing
     document.getElementById("offerBox").value = code;
 
     log("Reconnect offer ready — share it with Peer B again.", "ok");
@@ -449,23 +370,32 @@ async function manualReconnect() {
 // If the channel is dead ("failed"), we fall back to the manual reconnect UI.
 
 let reconnectTimer = null;
+let reconnectAttemptSeq = 0;
 
 function scheduleReconnect() {
   if (iceRestarting) return;
   iceRestarting = true;
+  reconnectAttemptSeq += 1;
+  const attempt = reconnectAttemptSeq;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
 
   // Wait 3s — WebRTC sometimes heals itself (e.g. brief network blip)
   log("Connection lost — waiting 3s before attempting restart…", "warn");
   reconnectTimer = setTimeout(async () => {
+    if (attempt !== reconnectAttemptSeq) return;
     if (!pc || pc.connectionState === "connected") {
       iceRestarting = false;
       return;
     }
-    await attemptIceRestart();
+    await attemptIceRestart(attempt);
   }, 3000);
 }
 
-async function attemptIceRestart() {
+async function attemptIceRestart(attempt = reconnectAttemptSeq) {
+  if (attempt !== reconnectAttemptSeq) return;
   log("Attempting ICE restart…", "warn");
   setStatus("Reconnecting…", "connecting");
 
@@ -475,6 +405,7 @@ async function attemptIceRestart() {
     // Answerer just waits — Peer A will send ICE_OFFER through channel if possible
     // If channel is dead, both sides will time out and show the reconnect panel
     setTimeout(() => {
+      if (attempt !== reconnectAttemptSeq) return;
       if (!pc || pc.connectionState !== "connected") {
         log("No restart received from Peer A. Use Reconnect button.", "warn");
         showReconnectPanel(true);
@@ -488,20 +419,24 @@ async function attemptIceRestart() {
     // Try sending restart offer through the data channel
     if (channel && channel.readyState === "open") {
       log("Sending ICE restart offer via data channel…");
-      const offer = await pc.createOffer({ iceRestart: true });
-      await pc.setLocalDescription(offer);
-      await waitIce();
-      channel.send("ICE_OFFER:" + compress(pc.localDescription));
-      log("ICE restart offer sent — waiting for Peer B's answer…");
-
-      // If no answer within 8s, the channel probably died — show manual UI
-      setTimeout(() => {
+      const noAnswerTimer = setTimeout(() => {
+        if (attempt !== reconnectAttemptSeq) return;
         if (pc && pc.connectionState !== "connected") {
           log("No answer from Peer B. Use Reconnect button.", "warn");
           showReconnectPanel(true);
           iceRestarting = false;
         }
       }, 8000);
+
+      const offer = await pc.createOffer({ iceRestart: true });
+      await pc.setLocalDescription(offer);
+      await waitIce();
+      if (attempt !== reconnectAttemptSeq) {
+        clearTimeout(noAnswerTimer);
+        return;
+      }
+      channel.send("ICE_OFFER:" + compress(pc.localDescription));
+      log("ICE restart offer sent — waiting for Peer B's answer…");
 
     } else {
       // Channel is dead — can't auto-restart, need manual re-exchange
@@ -520,6 +455,7 @@ async function attemptIceRestart() {
 function createPeer() {
   if (pc) { pc.close(); pc = null; }
   if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  reconnectAttemptSeq += 1;
   iceRestarting = false;
   showReconnectPanel(false);
 
@@ -695,7 +631,17 @@ function setupChannel() {
     if (e.data.startsWith("MSG:"))  { addChat("peer", e.data.slice(4)); return; }
 
     if (e.data.startsWith("META:")) {
-      incomingFileInfo = JSON.parse(e.data.slice(5));
+      try {
+        incomingFileInfo = JSON.parse(e.data.slice(5));
+      } catch (err) {
+        log("Invalid file metadata payload: " + err.message, "err");
+        incomingFileInfo = null;
+        incomingWritable = null;
+        receivedChunks = [];
+        receivedBytes = 0;
+        updateProgress(0, "Receive error");
+        return;
+      }
       receivedChunks = []; receivedBytes = 0;
       incomingWritable = null;
       if (saveDirectoryHandle) {
@@ -717,28 +663,36 @@ function setupChannel() {
 }
 
 // ── ICE wait: resolve only when gathering is fully complete ──────────────────
-function waitIce() {
+function waitIce(timeoutMs = ICE_WAIT_TIMEOUT_MS) {
   return new Promise((resolve) => {
-    if (!pc || pc.iceGatheringState === "complete") { resolve(); return; }
+    if (!pc || pc.iceGatheringState === "complete") { resolve(true); return; }
     let finished = false;
+    const timer = setTimeout(() => {
+      finish(false, "ICE gathering timed out. Proceeding with partial candidates.");
+    }, timeoutMs);
 
-    function finish() {
+    function finish(complete, timeoutMsg) {
       if (finished) return;
       finished = true;
-      if (!pc) { resolve(); return; }
+      clearTimeout(timer);
+      if (!pc) { resolve(false); return; }
       pc.removeEventListener("icegatheringstatechange", onState);
       pc.removeEventListener("icecandidate", onCandidate);
-      log("ICE ready (complete).");
-      resolve();
+      if (complete) {
+        log("ICE ready (complete).");
+      } else if (timeoutMsg) {
+        log(timeoutMsg, "warn");
+      }
+      resolve(complete);
     }
 
     function onState() {
-      if (pc && pc.iceGatheringState === "complete") finish();
+      if (pc && pc.iceGatheringState === "complete") finish(true);
     }
 
     function onCandidate(e) {
       // Per WebRTC spec, null candidate indicates end of gathering.
-      if (!e.candidate) finish();
+      if (!e.candidate) finish(true);
     }
 
     pc.addEventListener("icegatheringstatechange", onState);
@@ -766,21 +720,10 @@ async function createOffer() {
     await waitIce();
 
     const sdp = pc.localDescription;
-
-    if (getMode() === "qr") {
-      log("Uploading offer to relay…");
-      const id = await uploadToRelay(sdp);
-      log("Offer uploaded. Code: " + id, "ok");
-      document.getElementById("offerBox").value = id;
-      document.getElementById("offerBoxQR").value = formatCode(id);
-      showQR("offerQR", id);
-      setStatus("Share offer code with Peer B", "connecting");
-    } else {
-      const code = compress(sdp);
-      document.getElementById("offerBox").value = code;
-      log("Offer ready (" + code.length + " chars).", "ok");
-      setStatus("Send offer code to Peer B", "connecting");
-    }
+    const code = compress(sdp);
+    document.getElementById("offerBox").value = code;
+    log("Offer ready (" + code.length + " chars).", "ok");
+    setStatus("Send offer code to Peer B", "connecting");
     setConnectionBtns(true);
   } catch (err) {
     log("Error: " + err.message, "err");
@@ -803,17 +746,9 @@ async function acceptOffer() {
     log("Generating answer…");
     isOfferer = false;         // this peer waits for ICE restart offers
 
-    let sdp;
-    if (getMode() === "qr") {
-      const id = getRelayInputValue("offerBoxQR", "offerBox");
-      if (!id) { log("Enter the offer code.", "warn"); setConnectionBtns(true); return; }
-      log("Fetching offer from relay…");
-      sdp = await downloadFromRelay(id);
-    } else {
-      const raw = document.getElementById("offerBox").value.trim();
-      if (!raw) { log("Paste the offer code first.", "warn"); setConnectionBtns(true); return; }
-      sdp = decompress(raw);
-    }
+    const raw = document.getElementById("offerBox").value.trim();
+    if (!raw) { log("Paste the offer code first.", "warn"); setConnectionBtns(true); return; }
+    const sdp = decompress(raw);
 
     createPeer();
     await pc.setRemoteDescription(sdp);
@@ -821,21 +756,10 @@ async function acceptOffer() {
     await waitIce();
 
     const answerSdp = pc.localDescription;
-
-    if (getMode() === "qr") {
-      log("Uploading answer to relay…");
-      const id = await uploadToRelay(answerSdp);
-      log("Answer uploaded. Code: " + id, "ok");
-      document.getElementById("answerBox").value = id;
-      document.getElementById("answerBoxQR").value = formatCode(id);
-      showQR("answerQR", id);
-      setStatus("Share answer code with Peer A", "connecting");
-    } else {
-      const code = compress(answerSdp);
-      document.getElementById("answerBox").value = code;
-      log("Answer ready — send to Peer A.", "ok");
-      setStatus("Send answer code to Peer A", "connecting");
-    }
+    const code = compress(answerSdp);
+    document.getElementById("answerBox").value = code;
+    log("Answer ready — send to Peer A.", "ok");
+    setStatus("Send answer code to Peer A", "connecting");
     setConnectionBtns(true);
   } catch (err) {
     log("Error: " + err.message, "err");
@@ -862,17 +786,9 @@ async function acceptAnswer() {
       return;
     }
 
-    let sdp;
-    if (getMode() === "qr") {
-      const id = getRelayInputValue("answerBoxQR", "answerBox");
-      if (!id) { log("Enter the answer code.", "warn"); setConnectionBtns(true); return; }
-      log("Fetching answer from relay…");
-      sdp = await downloadFromRelay(id);
-    } else {
-      const raw = document.getElementById("answerBox").value.trim();
-      if (!raw) { log("Paste the answer code first.", "warn"); setConnectionBtns(true); return; }
-      sdp = decompress(raw);
-    }
+    const raw = document.getElementById("answerBox").value.trim();
+    if (!raw) { log("Paste the answer code first.", "warn"); setConnectionBtns(true); return; }
+    const sdp = decompress(raw);
 
     await pc.setRemoteDescription(sdp);
     log("Answer accepted — connecting…", "ok");
@@ -890,38 +806,51 @@ async function sendFile() {
   if (!file) { log("Select a file first.", "warn"); return; }
   if (!channel || channel.readyState !== "open") { log("Not connected.", "err"); return; }
 
-  log("Sending: " + file.name + " (" + fmtBytes(file.size) + ")");
-  channel.send("META:" + JSON.stringify({ name: file.name, size: file.size, type: file.type || "application/octet-stream" }));
+  try {
+    log("Sending: " + file.name + " (" + fmtBytes(file.size) + ")");
+    channel.send("META:" + JSON.stringify({ name: file.name, size: file.size, type: file.type || "application/octet-stream" }));
 
-  const reader = file.stream().getReader();
-  let sent = 0;
+    const reader = file.stream().getReader();
+    let sent = 0;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value || !value.byteLength) continue;
-
-    let start = 0;
-    while (start < value.byteLength) {
-      const end = Math.min(start + CHUNK_SIZE, value.byteLength);
-      const chunk = value.slice(start, end);
-
-      if (channel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
-        await waitForBufferedLow();
+    while (true) {
+      if (!channel || channel.readyState !== "open") {
+        throw new Error("Connection dropped during file transfer");
       }
-      channel.send(chunk);
-      sent += chunk.byteLength;
-      start = end;
-      updateProgress(Math.min(100, (sent / file.size) * 100), "Sending…");
-    }
-  }
 
-  if (channel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
-    await waitForBufferedLow();
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || !value.byteLength) continue;
+
+      let start = 0;
+      while (start < value.byteLength) {
+        if (!channel || channel.readyState !== "open") {
+          throw new Error("Connection dropped during file transfer");
+        }
+
+        const end = Math.min(start + CHUNK_SIZE, value.byteLength);
+        const chunk = value.slice(start, end);
+
+        if (channel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+          await waitForBufferedLow();
+        }
+        channel.send(chunk);
+        sent += chunk.byteLength;
+        start = end;
+        updateProgress(Math.min(100, (sent / file.size) * 100), "Sending…");
+      }
+    }
+
+    if (channel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+      await waitForBufferedLow();
+    }
+    channel.send("EOF");
+    updateProgress(100, "Sent ✓");
+    log("Sent: " + file.name, "ok");
+  } catch (err) {
+    updateProgress(0, "Send failed");
+    log("File send failed: " + err.message, "err");
   }
-  channel.send("EOF");
-  updateProgress(100, "Sent ✓");
-  log("Sent: " + file.name, "ok");
 }
 
 // ── File receive ──────────────────────────────────────────────────────────────
@@ -992,15 +921,11 @@ function addChat(who, msg) {
 
 // ── Copy ──────────────────────────────────────────────────────────────────────
 function copyOffer() {
-  const v = getMode() === "qr"
-    ? getRelayInputValue("offerBoxQR", "offerBox")
-    : document.getElementById("offerBox").value;
+  const v = document.getElementById("offerBox").value;
   if (v) navigator.clipboard.writeText(v).then(() => flash("copyOfferBtn", "Copied!"));
 }
 function copyAnswer() {
-  const v = getMode() === "qr"
-    ? getRelayInputValue("answerBoxQR", "answerBox")
-    : document.getElementById("answerBox").value;
+  const v = document.getElementById("answerBox").value;
   if (v) navigator.clipboard.writeText(v).then(() => flash("copyAnswerBtn", "Copied!"));
 }
 
@@ -1020,5 +945,4 @@ setRole("none");
 // ── Init ──────────────────────────────────────────────────────────────────────
 setTransferControls(false);
 setStatus("Not connected", "idle");
-log("PeerDrop 95 ready. Select a mode and click Create Offer to begin.");
-onModeChange();
+log("PeerDrop 95 ready. Click Create Offer to begin.");
